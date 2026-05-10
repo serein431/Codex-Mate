@@ -1,0 +1,32 @@
+  name: Release assets
+
+  on:
+    release:
+      types: [published]
+
+  permissions:
+    contents: write
+
+  jobs:
+    upload-source-asset:
+      runs-on: ubuntu-latest
+
+      steps:
+        - name: Checkout release tag
+          uses: actions/checkout@v4
+          with:
+            ref: ${{ github.event.release.tag_name }}
+
+        - name: Create source package
+          run: |
+            git archive \
+              --format=zip \
+              --output=CodexPlusPlus.zip \
+              --prefix=CodexPlusPlus/ \
+              HEAD
+
+        - name: Upload CodexPlusPlus.zip to release
+          uses: softprops/action-gh-release@v2
+          with:
+            tag_name: ${{ github.event.release.tag_name }}
+            files: CodexPlusPlus.zip
