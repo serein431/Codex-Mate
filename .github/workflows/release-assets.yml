@@ -1,0 +1,91 @@
+name: Release assets
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  upload-source-asset:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Create source package
+        run: |
+          git archive \
+            --format=zip \
+            --output=CodexMate.zip \
+            --prefix=CodexMate/ \
+            HEAD
+
+      - name: Upload CodexMate.zip to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.release.tag_name }}
+          files: CodexMate.zip
+
+  upload-standalone-assets:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            asset_name: CodexMate-windows.zip
+            binary_name: CodexMate.exe
+          - os: macos-latest
+            asset_name: CodexMate-macos.zip
+            binary_name: CodexMate
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install . pyinstaller
+
+      - name: Build standalone executable
+        run: |
+          python -m PyInstaller --onefile --name CodexMate --collect-data codex_mate codex_mate/__main__.py
+
+      - name: Package Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path package/CodexMate | Out-Null
+          Copy-Item dist/CodexMate.exe package/CodexMate/CodexMate.exe
+          Copy-Item setup.bat package/CodexMate/setup.bat
+          Copy-Item README.md package/CodexMate/README.md
+          Compress-Archive -Path package/CodexMate -DestinationPath ${{ matrix.asset_name }} -Force
+
+      - name: Package macOS installer
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p package/CodexMate
+          cp dist/CodexMate package/CodexMate/CodexMate
+          cp setup.command package/CodexMate/setup.command
+          cp README.md package/CodexMate/README.md
+          chmod +x package/CodexMate/CodexMate package/CodexMate/setup.command
+          ditto -c -k --sequesterRsrc --keepParent package/CodexMate ${{ matrix.asset_name }}
+
+      - name: Upload standalone asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.release.tag_name }}
+          files: ${{ matrix.asset_name }}
