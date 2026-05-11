@@ -1,0 +1,255 @@
+from __future__ import annotations
+
+import json
+import sqlite3
+from pathlib import Path
+
+from codex_mate import history_sync
+
+
+def write_config(home: Path, provider: str = "current_provider", model: str = "gpt-current") -> None:
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "config.toml").write_text(
+        f'model_provider = "{provider}"\nmodel = "{model}"\n',
+        encoding="utf-8",
+    )
+
+
+def create_threads_db(home: Path) -> None:
+    conn = sqlite3.connect(home / "state_5.sqlite")
+    try:
+        conn.execute(
+            """
+            CREATE TABLE threads (
+                id TEXT PRIMARY KEY,
+                title TEXT,
+                updated_at INTEGER,
+                archived INTEGER DEFAULT 0,
+                model_provider TEXT,
+                model TEXT
+            )
+            """
+        )
+        conn.executemany(
+            "INSERT INTO threads (id, title, updated_at, archived, model_provider, model) VALUES (?, ?, ?, ?, ?, ?)",
+            [
+                ("old-thread", "Old Thread", 100, 0, "old_provider", "gpt-old"),
+                ("already-current", "Current Thread", 200, 0, "current_provider", "gpt-current"),
+                ("archived-thread", "Archived", 300, 1, "old_provider", "gpt-old"),
+            ],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def create_threads_db_with_cwd(home: Path) -> None:
+    conn = sqlite3.connect(home / "state_5.sqlite")
+    try:
+        conn.execute(
+            """
+            CREATE TABLE threads (
+                id TEXT PRIMARY KEY,
+                title TEXT,
+                updated_at INTEGER,
+                updated_at_ms INTEGER,
+                archived INTEGER DEFAULT 0,
+                model_provider TEXT,
+                model TEXT,
+                cwd TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
+        conn.executemany(
+            "INSERT INTO threads (id, title, updated_at, updated_at_ms, archived, model_provider, model, cwd) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                ("project-thread", "Project Thread", 100, 100000, 0, "old_provider", "gpt-old", "/work/project"),
+                ("project-thread-2", "Project Thread 2", 200, 200000, 0, "old_provider", "gpt-old", "/work/project"),
+                ("project-thread-other", "Other Project", 300, 300000, 0, "old_provider", "gpt-old", "/work/other"),
+                ("empty-cwd-thread", "No Project", 400, 400000, 0, "old_provider", "gpt-old", ""),
+                ("archived-thread", "Archived", 500, 500000, 1, "old_provider", "gpt-old", "/work/project"),
+            ],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def write_session_file(home: Path, thread_id: str, provider: str, model: str) -> Path:
+    session_dir = home / "sessions" / "2026" / "01"
+    session_dir.mkdir(parents=True, exist_ok=True)
+    path = session_dir / f"rollout-2026-01-01T00-00-00-{thread_id}.jsonl"
+    first = {
+        "type": "session_meta",
+        "payload": {
+            "id": thread_id,
+            "model_provider": provider,
+            "model": model,
+        },
+    }
+    path.write_text(json.dumps(first) + "\n{\"type\":\"event_msg\",\"payload\":{}}\n", encoding="utf-8")
+    return path
+
+
+def test_sync_history_rehomes_database_sessions_and_index(tmp_path):
+    home = tmp_path / ".codex"
+    write_config(home)
+    create_threads_db(home)
+    session_path = write_session_file(home, "old-thread", "old_provider", "gpt-old")
+    (home / "session_index.jsonl").write_text(
+        json.dumps({"id": "already-current", "thread_name": "Current Thread", "updated_at": "1970-01-01T00:00:00Z"}) + "\n",
+        encoding="utf-8",
+    )
+    paths = history_sync.resolve_paths(home)
+
+    result = history_sync.sync_history_to_current_profile(paths)
+
+    assert result["updated_database_rows"] == 2
+    assert result["updated_session_files"] == 1
+    assert result["rewritten_index_entries"] == 2
+    assert Path(result["backup_path"]).exists()
+    assert Path(result["backup_path"] + ".session_index.jsonl").exists()
+    assert Path(result["backup_path"] + ".session_meta.json").exists()
+
+    with sqlite3.connect(home / "state_5.sqlite") as conn:
+        rows = conn.execute(
+            "SELECT model_provider, model, COUNT(*) FROM threads GROUP BY model_provider, model"
+        ).fetchall()
+    assert rows == [("current_provider", "gpt-current", 3)]
+
+    first_line = session_path.read_text(encoding="utf-8").splitlines()[0]
+    payload = json.loads(first_line)["payload"]
+    assert payload["model_provider"] == "current_provider"
+    assert payload["model"] == "gpt-current"
+
+    index_entries = [json.loads(line) for line in (home / "session_index.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [entry["id"] for entry in index_entries] == ["old-thread", "already-current"]
+    assert index_entries[0]["thread_name"] == "Old Thread"
+
+
+def test_sync_history_preserves_existing_index_entries_not_in_database(tmp_path):
+    home = tmp_path / ".codex"
+    write_config(home)
+    create_threads_db(home)
+    (home / "session_index.jsonl").write_text(
+        json.dumps({"id": "file-only", "thread_name": "File Only", "updated_at": "2026-01-01T00:00:00Z"}) + "\n",
+        encoding="utf-8",
+    )
+    paths = history_sync.resolve_paths(home)
+
+    result = history_sync.sync_history_to_current_profile(paths)
+
+    assert result["rewritten_index_entries"] == 3
+    assert result["preserved_index_entries"] == 1
+    index_entries = [json.loads(line) for line in (home / "session_index.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [entry["id"] for entry in index_entries] == ["old-thread", "already-current", "file-only"]
+
+
+def test_sync_history_does_not_clear_index_when_threads_table_is_missing(tmp_path):
+    home = tmp_path / ".codex"
+    write_config(home)
+    sqlite3.connect(home / "state_5.sqlite").close()
+    (home / "session_index.jsonl").write_text(
+        json.dumps({"id": "existing-thread", "thread_name": "Existing Thread", "updated_at": "2026-01-01T00:00:00Z"}) + "\n",
+        encoding="utf-8",
+    )
+    paths = history_sync.resolve_paths(home)
+
+    result = history_sync.sync_history_to_current_profile(paths)
+
+    assert result["updated_database_rows"] == 0
+    assert result["rewritten_index_entries"] == 1
+    index_entries = [json.loads(line) for line in (home / "session_index.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert index_entries == [{"id": "existing-thread", "thread_name": "Existing Thread", "updated_at": "2026-01-01T00:00:00Z"}]
+
+
+def test_sync_history_skips_locked_session_files_without_aborting(tmp_path, monkeypatch):
+    home = tmp_path / ".codex"
+    write_config(home)
+    create_threads_db(home)
+    locked_path = write_session_file(home, "old-thread", "old_provider", "gpt-old")
+    updated_path = write_session_file(home, "already-current", "old_provider", "gpt-old")
+    original_atomic_write_text = history_sync.atomic_write_text
+
+    def fail_locked_file(path: Path, text: str) -> None:
+        if path == locked_path:
+            raise PermissionError("Access is denied")
+        original_atomic_write_text(path, text)
+
+    monkeypatch.setattr(history_sync, "atomic_write_text", fail_locked_file)
+
+    result = history_sync.sync_history_to_current_profile(history_sync.resolve_paths(home))
+
+    assert result["updated_session_files"] == 1
+    assert len(result["skipped_session_files"]) == 1
+    assert "Access is denied" in result["skipped_session_files"][0]
+    payload = json.loads(updated_path.read_text(encoding="utf-8").splitlines()[0])["payload"]
+    assert payload["model_provider"] == "current_provider"
+
+
+def test_sync_history_skips_when_codex_state_is_missing(tmp_path):
+    paths = history_sync.resolve_paths(tmp_path / ".codex")
+
+    result = history_sync.sync_history_if_ready(paths)
+
+    assert result["ok"] is True
+    assert result["skipped"] is True
+    assert "missing" in result["reason"]
+
+
+def test_sync_history_repairs_desktop_global_state_sidebar_indexes(tmp_path):
+    home = tmp_path / ".codex"
+    write_config(home)
+    create_threads_db_with_cwd(home)
+    (home / ".codex-global-state.json").write_text(
+        json.dumps(
+            {
+                "projectless-thread-ids": ["existing-thread", "project-thread"],
+                "thread-workspace-root-hints": {"existing-thread": "/existing"},
+                "project-order": ["/existing"],
+                "electron-saved-workspace-roots": ["/existing"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = history_sync.sync_history_to_current_profile(history_sync.resolve_paths(home))
+
+    assert result["updated_global_state"] is True
+    assert result["global_state_thread_hints_added"] == 3
+    assert result["global_state_project_roots_added"] == 2
+    assert result["global_state_saved_roots_added"] == 2
+    assert result["global_state_projectless_threads_added"] == 1
+    assert result["global_state_projectless_threads_removed"] == 1
+    assert Path(result["backup_path"] + ".codex-global-state.json").exists()
+
+    state = json.loads((home / ".codex-global-state.json").read_text(encoding="utf-8"))
+    assert state["thread-workspace-root-hints"]["project-thread"] == "/work/project"
+    assert state["thread-workspace-root-hints"]["project-thread-2"] == "/work/project"
+    assert state["thread-workspace-root-hints"]["project-thread-other"] == "/work/other"
+    assert "/work/project" in state["project-order"]
+    assert "/work/other" in state["project-order"]
+    assert "/work/project" in state["electron-saved-workspace-roots"]
+    assert "/work/other" in state["electron-saved-workspace-roots"]
+    assert "project-thread" not in state["projectless-thread-ids"]
+    assert "project-thread-2" not in state["projectless-thread-ids"]
+    assert "project-thread-other" not in state["projectless-thread-ids"]
+    assert "empty-cwd-thread" in state["projectless-thread-ids"]
+    assert "archived-thread" not in state["projectless-thread-ids"]
+
+
+def test_sync_global_state_is_idempotent(tmp_path):
+    home = tmp_path / ".codex"
+    write_config(home)
+    create_threads_db_with_cwd(home)
+    paths = history_sync.resolve_paths(home)
+
+    first = history_sync.sync_global_state(paths)
+    second = history_sync.sync_global_state(paths)
+
+    assert first["updated_global_state"] is True
+    assert second["updated_global_state"] is False
+    assert second["global_state_thread_hints_added"] == 0
+    assert second["global_state_project_roots_added"] == 0
+    assert second["global_state_projectless_threads_added"] == 0
+    assert second["global_state_projectless_threads_removed"] == 0
