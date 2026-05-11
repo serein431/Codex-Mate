@@ -95,6 +95,84 @@ def test_sync_history_rehomes_database_sessions_and_index(tmp_path):
     assert index_entries[0]["thread_name"] == "Old Thread"
 
 
+def test_rebuild_session_index_preserves_existing_entry_fields(tmp_path):
+    home = tmp_path / ".codex"
+    write_config(home)
+    create_threads_db(home)
+    (home / "session_index.jsonl").write_text(
+        json.dumps(
+            {
+                "id": "old-thread",
+                "thread_name": "Stale title",
+                "updated_at": "1970-01-01T00:00:00Z",
+                "workspace_path": "C:/work/project",
+                "rollout_path": "sessions/2026/01/rollout-old-thread.jsonl",
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    paths = history_sync.resolve_paths(home)
+
+    result = history_sync.rebuild_session_index(paths)
+
+    assert result["rewritten_index_entries"] == 2
+    index_entries = [json.loads(line) for line in (home / "session_index.jsonl").read_text(encoding="utf-8").splitlines()]
+    old_thread = next(entry for entry in index_entries if entry["id"] == "old-thread")
+    assert old_thread["thread_name"] == "Old Thread"
+    assert old_thread["workspace_path"] == "C:/work/project"
+    assert old_thread["rollout_path"] == "sessions/2026/01/rollout-old-thread.jsonl"
+
+
+def test_rebuild_session_index_keeps_entries_not_found_in_database(tmp_path):
+    home = tmp_path / ".codex"
+    write_config(home)
+    create_threads_db(home)
+    (home / "session_index.jsonl").write_text(
+        json.dumps({"id": "remote-only", "thread_name": "Remote Only", "updated_at": "2026-01-01T00:00:00Z", "workspace_path": "C:/remote"})
+        + "\n",
+        encoding="utf-8",
+    )
+    paths = history_sync.resolve_paths(home)
+
+    result = history_sync.rebuild_session_index(paths)
+
+    assert result["rewritten_index_entries"] == 3
+    index_entries = [json.loads(line) for line in (home / "session_index.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert index_entries[0]["id"] == "remote-only"
+    assert index_entries[0]["workspace_path"] == "C:/remote"
+    assert {entry["id"] for entry in index_entries} == {"remote-only", "old-thread", "already-current"}
+
+
+def test_restore_history_backup_restores_database_index_and_session_meta(tmp_path):
+    home = tmp_path / ".codex"
+    write_config(home)
+    create_threads_db(home)
+    session_path = write_session_file(home, "old-thread", "old_provider", "gpt-old")
+    (home / "session_index.jsonl").write_text(json.dumps({"id": "old-thread", "thread_name": "Old Thread"}) + "\n", encoding="utf-8")
+    paths = history_sync.resolve_paths(home)
+    backup = history_sync.make_backup(paths)
+
+    with sqlite3.connect(home / "state_5.sqlite") as conn:
+        conn.execute("DELETE FROM threads WHERE id = ?", ("old-thread",))
+        conn.commit()
+    (home / "session_index.jsonl").write_text("", encoding="utf-8")
+    first_line, ending, remainder = history_sync.split_first_line(session_path.read_text(encoding="utf-8"))
+    changed = json.loads(first_line)
+    changed["payload"]["model_provider"] = "broken"
+    session_path.write_text(json.dumps(changed) + ending + remainder, encoding="utf-8")
+
+    result = history_sync.restore_history_backup(paths, backup)
+
+    assert result["ok"] is True
+    assert Path(result["pre_restore_backup_path"]).exists()
+    with sqlite3.connect(home / "state_5.sqlite") as conn:
+        assert conn.execute("SELECT COUNT(*) FROM threads WHERE id = ?", ("old-thread",)).fetchone()[0] == 1
+    assert "old-thread" in (home / "session_index.jsonl").read_text(encoding="utf-8")
+    restored_first = json.loads(session_path.read_text(encoding="utf-8").splitlines()[0])
+    assert restored_first["payload"]["model_provider"] == "old_provider"
+
+
 def test_sync_history_skips_when_codex_state_is_missing(tmp_path):
     paths = history_sync.resolve_paths(tmp_path / ".codex")
 

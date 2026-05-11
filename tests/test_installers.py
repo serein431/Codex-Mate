@@ -32,6 +32,20 @@ def test_install_dispatches_to_windows(monkeypatch):
     assert autostart_calls == [9229]
 
 
+def test_install_can_skip_watcher(monkeypatch):
+    calls = []
+    autostart_calls = []
+    monkeypatch.setattr(installers.sys, "platform", "win32")
+    monkeypatch.setattr(installers, "install_windows_shortcuts", lambda options: calls.append(options))
+    monkeypatch.setattr(installers.autostart, "install_watcher_autostart", lambda debug_port: autostart_calls.append(debug_port))
+
+    options = InstallOptions(install_watcher=False)
+    installers.install_codex_plus_plus(options)
+
+    assert calls == [options]
+    assert autostart_calls == []
+
+
 def test_uninstall_dispatches_to_macos(monkeypatch):
     calls = []
     autostart_calls = []

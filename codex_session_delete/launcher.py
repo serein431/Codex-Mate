@@ -300,27 +300,6 @@ def launch_and_inject(app_dir: Path | None, db_path: Path | None, backup_dir: Pa
         return server, codex_proc
     except Exception:
         shutdown_helper(server)
-        # Kill any Codex process we just activated so the next attempt starts from a clean state
-        # instead of staring at a half-rendered white window.
-        if sys.platform == "win32":
-            try:
-                subprocess.run(
-                    [
-                        "powershell.exe",
-                        "-NoProfile",
-                        "-NonInteractive",
-                        "-Command",
-                        "Get-CimInstance Win32_Process -Filter \"Name='Codex.exe' OR Name='codex.exe'\" | "
-                        "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }",
-                    ],
-                    check=False,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    timeout=6,
-                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-                )
-            except (OSError, subprocess.SubprocessError):
-                pass
         raise
 
 

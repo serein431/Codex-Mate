@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import sqlite3
 import time
 import tomllib
@@ -205,7 +206,28 @@ def iso_from_unix(value: int | None) -> str:
     return datetime.fromtimestamp(int(value), tz=UTC).isoformat().replace("+00:00", "Z")
 
 
+def read_existing_session_index(paths: HistoryPaths) -> list[dict[str, object]]:
+    if not paths.session_index_path.exists():
+        return []
+    entries: list[dict[str, object]] = []
+    for line in paths.session_index_path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(entry, dict):
+            continue
+        thread_id = entry.get("id")
+        if isinstance(thread_id, str) and thread_id:
+            entries.append(entry)
+    return entries
+
+
 def rebuild_session_index(paths: HistoryPaths) -> dict[str, int]:
+    existing_entries = read_existing_session_index(paths)
+    existing_by_id = {str(entry["id"]): entry for entry in existing_entries}
     with connect_db(paths.db_path, readonly=True) as conn:
         columns = table_columns(conn, "threads")
         select_parts = ["id"]
@@ -218,20 +240,101 @@ def rebuild_session_index(paths: HistoryPaths) -> dict[str, int]:
             f"SELECT {', '.join(select_parts)} FROM threads {where_sql} ORDER BY updated_at ASC, id ASC"
         ).fetchall()
 
-    entries = []
+    active_by_id: dict[str, dict[str, object]] = {}
     for row in rows:
+        thread_id = str(row["id"])
         title = str(row["title"]) if "title" in row.keys() and row["title"] else str(row["id"])
         updated_at = int(row["updated_at"]) if "updated_at" in row.keys() and row["updated_at"] else 0
-        entries.append(
-            {
-                "id": str(row["id"]),
-                "thread_name": title,
-                "updated_at": iso_from_unix(updated_at),
-            }
-        )
+        active_by_id[thread_id] = {"id": thread_id, "thread_name": title, "updated_at": iso_from_unix(updated_at)}
+
+    entries: list[dict[str, object]] = []
+    seen: set[str] = set()
+    for existing in existing_entries:
+        thread_id = str(existing["id"])
+        entry = dict(existing)
+        if thread_id in active_by_id:
+            entry.update(active_by_id[thread_id])
+        entries.append(entry)
+        seen.add(thread_id)
+
+    for thread_id, active_entry in active_by_id.items():
+        if thread_id in seen:
+            continue
+        entry = dict(existing_by_id.get(thread_id, {}))
+        entry.update(active_entry)
+        entries.append(entry)
+
     content = "".join(json.dumps(entry, ensure_ascii=False, separators=(",", ":")) + "\n" for entry in entries)
     atomic_write_text(paths.session_index_path, content)
-    return {"rewritten_index_entries": len(entries)}
+    return {"rewritten_index_entries": len(entries), "preserved_index_entries": len(existing_entries)}
+
+
+def list_history_backups(paths: HistoryPaths) -> list[Path]:
+    if not paths.backup_dir.exists():
+        return []
+    return sorted(paths.backup_dir.glob("state_5.sqlite.*.bak"), key=lambda path: path.stat().st_mtime)
+
+
+def latest_history_backup(paths: HistoryPaths) -> Path:
+    backups = list_history_backups(paths)
+    if not backups:
+        raise RuntimeError(f"No Codex Mate history backups found in {paths.backup_dir}")
+    return backups[-1]
+
+
+def restore_session_meta_snapshot(paths: HistoryPaths, meta_path: Path) -> int:
+    if not meta_path.exists():
+        return 0
+    restored = 0
+    items = json.loads(meta_path.read_text(encoding="utf-8"))
+    if not isinstance(items, list):
+        return 0
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        raw_path = item.get("path")
+        first_line = item.get("first_line")
+        if not isinstance(raw_path, str) or not isinstance(first_line, str):
+            continue
+        path = Path(raw_path)
+        if not path.is_absolute():
+            path = paths.codex_home / path
+        if not path.exists():
+            continue
+        text = path.read_text(encoding="utf-8")
+        _, ending, remainder = split_first_line(text)
+        atomic_write_text(path, first_line + (ending + remainder if ending else "\n"))
+        restored += 1
+    return restored
+
+
+def restore_history_backup(paths: HistoryPaths, backup: str | Path | None = None) -> dict[str, object]:
+    backup_path = Path(backup).expanduser() if backup is not None else latest_history_backup(paths)
+    if not backup_path.exists():
+        raise RuntimeError(f"Backup not found: {backup_path}")
+    if backup_path.name.startswith(".") or backup_path.suffix != ".bak":
+        raise RuntimeError(f"Invalid history backup path: {backup_path}")
+
+    current_backup = make_backup(paths, label="pre-restore") if paths.db_path.exists() else None
+    paths.db_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(backup_path, paths.db_path)
+
+    index_path = session_index_backup_path(backup_path)
+    restored_index = False
+    if index_path.exists():
+        paths.session_index_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(index_path, paths.session_index_path)
+        restored_index = True
+
+    restored_session_files = restore_session_meta_snapshot(paths, session_meta_backup_path(backup_path))
+    return {
+        "ok": True,
+        "restored_backup_path": str(backup_path),
+        "pre_restore_backup_path": str(current_backup) if current_backup else None,
+        "restored_database": True,
+        "restored_session_index": restored_index,
+        "restored_session_files": restored_session_files,
+    }
 
 
 def sync_history_to_current_profile(paths: HistoryPaths) -> dict[str, object]:

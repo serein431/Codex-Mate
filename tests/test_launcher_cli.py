@@ -248,16 +248,20 @@ def test_launch_and_inject_returns_windows_packaged_process_id(monkeypatch, tmp_
 
 def test_launch_and_inject_closes_helper_when_injection_fails(monkeypatch, tmp_path):
     server = FakeServer()
+    cleanup_calls = []
+    monkeypatch.setattr(launcher.sys, "platform", "win32")
     monkeypatch.setattr(launcher, "resolve_codex_app_dir", lambda app_dir=None: tmp_path)
     monkeypatch.setattr(launcher, "start_helper", lambda *args, **kwargs: server)
     monkeypatch.setattr(launcher, "launch_codex_app", lambda *args: 1234)
     monkeypatch.setattr(launcher, "inject_with_retry", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("inject failed")))
+    monkeypatch.setattr(launcher.subprocess, "run", lambda *args, **kwargs: cleanup_calls.append((args, kwargs)))
 
     with pytest.raises(RuntimeError, match="inject failed"):
         launcher.launch_and_inject(None, None, tmp_path / "backups", 9229, 57321)
 
     assert server.shutdown_called is True
     assert server.server_close_called is True
+    assert cleanup_calls == []
 
 
 def test_launch_uses_resolved_app_dir(monkeypatch, tmp_path):
@@ -364,6 +368,18 @@ def test_cli_setup_alias_installs_with_default_launcher(monkeypatch):
     assert len(calls) == 1
     assert calls[0].install_root is None
     assert calls[0].launcher_command is None
+    assert calls[0].install_watcher is True
+
+
+def test_cli_setup_can_skip_watcher(monkeypatch):
+    calls = []
+    monkeypatch.setattr(cli, "install_codex_plus_plus", lambda options: calls.append(options))
+
+    exit_code = cli.main(["setup", "--no-watcher"])
+
+    assert exit_code == 0
+    assert len(calls) == 1
+    assert calls[0].install_watcher is False
 
 
 def test_cli_check_update_prints_latest_release(monkeypatch, capsys):
@@ -467,6 +483,19 @@ def test_cli_history_sync_prints_json(monkeypatch, tmp_path, capsys):
     assert exit_code == 0
     assert calls == [tmp_path]
     assert '"updated_database_rows": 2' in capsys.readouterr().out
+
+
+def test_cli_history_restore_prints_json(monkeypatch, tmp_path, capsys):
+    calls = []
+    backup = tmp_path / "state_5.sqlite.pre-sync.20260101-000000.bak"
+    monkeypatch.setattr(cli.history_sync, "resolve_paths", lambda codex_home: calls.append(("paths", codex_home)) or "paths")
+    monkeypatch.setattr(cli.history_sync, "restore_history_backup", lambda paths, backup_path: calls.append((paths, backup_path)) or {"ok": True, "restored_backup_path": str(backup_path)})
+
+    exit_code = cli.main(["history-restore", "--codex-home", str(tmp_path), "--backup", str(backup), "--json"])
+
+    assert exit_code == 0
+    assert calls == [("paths", tmp_path), ("paths", backup)]
+    assert '"restored_backup_path"' in capsys.readouterr().out
 
 
 def test_cli_remove_alias_uninstalls_with_default_options(monkeypatch):

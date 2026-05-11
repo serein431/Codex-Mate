@@ -24,6 +24,7 @@ def add_launch_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--backup-dir", type=Path, default=Path.home() / ".codex-session-delete" / "backups")
     parser.add_argument("--debug-port", type=int, default=9229)
     parser.add_argument("--helper-port", type=int, default=57321)
+    parser.add_argument("--history-sync", action="store_true", help="Sync Codex local history provider/model before launch (default)")
     parser.add_argument("--no-history-sync", action="store_true", help="Skip Codex local history provider/model sync before launch")
 
 
@@ -42,9 +43,11 @@ def build_parser() -> argparse.ArgumentParser:
     install_parser = subparsers.add_parser("install", help="Install the Codex Mate launcher entry point")
     install_parser.add_argument("--install-root", type=Path, default=None)
     install_parser.add_argument("--launcher-command", default=None)
+    install_parser.add_argument("--no-watcher", action="store_true", help="Do not install the background watcher that takes over native Codex launches")
 
     setup_parser = subparsers.add_parser("setup", help="Install Codex Mate with defaults")
     setup_parser.add_argument("--install-root", type=Path, default=None)
+    setup_parser.add_argument("--no-watcher", action="store_true", help="Do not install the background watcher that takes over native Codex launches")
 
     uninstall_parser = subparsers.add_parser("uninstall", help="Remove the Codex Mate launcher entry point")
     uninstall_parser.add_argument("--install-root", type=Path, default=None)
@@ -72,6 +75,10 @@ def build_parser() -> argparse.ArgumentParser:
     add_history_arguments(history_status_parser)
     history_sync_parser = subparsers.add_parser("history-sync", help="Sync local history to the current provider/model")
     add_history_arguments(history_sync_parser)
+    history_restore_parser = subparsers.add_parser("history-restore", help="Restore local history from a Codex Mate history backup")
+    add_history_arguments(history_restore_parser)
+    history_restore_parser.add_argument("--backup", type=Path, default=None, help="Path to a state_5.sqlite.*.bak file; defaults to latest backup")
+    history_restore_parser.add_argument("--latest", action="store_true", help="Restore the latest available backup")
 
     add_launch_arguments(parser)
     return parser
@@ -248,10 +255,22 @@ def run_history_sync(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_history_restore(args: argparse.Namespace) -> int:
+    payload = history_sync.restore_history_backup(history_sync.resolve_paths(args.codex_home), args.backup)
+    print_payload(payload, args.json)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command in {"install", "setup"}:
-        install_codex_plus_plus(InstallOptions(install_root=args.install_root, launcher_command=getattr(args, "launcher_command", None)))
+        install_codex_plus_plus(
+            InstallOptions(
+                install_root=args.install_root,
+                launcher_command=getattr(args, "launcher_command", None),
+                install_watcher=not getattr(args, "no_watcher", False),
+            )
+        )
         return 0
     if args.command in {"uninstall", "remove"}:
         uninstall_codex_plus_plus(InstallOptions(install_root=args.install_root, remove_data=args.remove_data))
@@ -278,6 +297,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_history_status(args)
     if args.command == "history-sync":
         return run_history_sync(args)
+    if args.command == "history-restore":
+        return run_history_restore(args)
     return run_launch(args)
 
 

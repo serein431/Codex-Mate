@@ -15,16 +15,19 @@ class InstallOptions:
     install_root: Path | None = None
     launcher_command: str | None = None
     remove_data: bool = False
+    install_watcher: bool = True
 
 
 def install_codex_plus_plus(options: InstallOptions) -> None:
     if sys.platform == "darwin":
         install_macos_app(options)
-        autostart.install_watcher_autostart(debug_port=9229)
+        if options.install_watcher:
+            autostart.install_watcher_autostart(debug_port=9229)
         return
     if sys.platform == "win32":
         install_windows_shortcuts(options)
-        autostart.install_watcher_autostart(debug_port=9229)
+        if options.install_watcher:
+            autostart.install_watcher_autostart(debug_port=9229)
         return
     raise RuntimeError(f"Unsupported platform for Codex Mate install: {sys.platform}")
 
