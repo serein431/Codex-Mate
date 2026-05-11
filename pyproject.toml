@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "codex-mate"
+version = "1.1.7"
+description = "External Codex App companion launcher"
+requires-python = ">=3.11"
+dependencies = [
+  "requests>=2.31",
+  "websocket-client>=1.7",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8.0"]
+
+[project.scripts]
+codex-mate = "codex_mate.cli:main"
+
+[tool.setuptools.package-data]
+codex_mate = ["assets/*", "inject/*.js"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
