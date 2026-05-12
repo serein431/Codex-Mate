@@ -1,6 +1,8 @@
 import json
 import websocket
 
+from codex_mate import __version__
+from codex_mate import cdp
 from codex_mate.cdp import BRIDGE_BINDING_NAME, _bridge_loop, add_script_to_new_document, build_bridge_script, make_bridge_binding_name, pick_page_target, runtime_evaluate
 
 
@@ -94,3 +96,24 @@ def test_persistent_script_helpers_register_reload_and_current_document_injectio
     assert ws.sent[0]["params"]["source"] == "window.__probe = true"
     assert ws.sent[1]["method"] == "Runtime.evaluate"
     assert ws.sent[1]["params"]["expression"] == "window.__probe = true"
+
+
+def test_inject_file_prefixes_helper_and_package_version(monkeypatch, tmp_path):
+    script_path = tmp_path / "renderer.js"
+    script_path.write_text("window.__rendererLoaded = true;", encoding="utf-8")
+    evaluated = []
+
+    monkeypatch.setattr(
+        cdp,
+        "list_targets",
+        lambda port: [{"type": "page", "title": "Codex", "url": "app://codex", "webSocketDebuggerUrl": "ws://page"}],
+    )
+    monkeypatch.setattr(cdp, "evaluate_script", lambda websocket_url, script: evaluated.append((websocket_url, script)) or {"result": {}})
+
+    result = cdp.inject_file(9229, script_path, 57321)
+
+    assert result == {"result": {}}
+    assert evaluated[0][0] == "ws://page"
+    assert f"window.__CODEX_MATE_HELPER__ = \"http://127.0.0.1:57321\";" in evaluated[0][1]
+    assert f"window.__CODEX_MATE_VERSION__ = {json.dumps(__version__)};" in evaluated[0][1]
+    assert evaluated[0][1].endswith("window.__rendererLoaded = true;")

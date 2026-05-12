@@ -25,6 +25,8 @@ def test_setup_bat_binary_update_downloads_and_applies_windows_package():
 
     assert "Bundled executable installs are updated by downloading" not in text
     assert "watch-remove" in text
+    assert "watcher-*.lock" in text
+    assert "Stop-Process -Id ([int]$LockPidText)" in text
     assert "Invoke-RestMethod" in text
     assert "CodexMate-windows.zip" in text
     assert "Invoke-WebRequest" in text

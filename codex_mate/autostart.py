@@ -48,6 +48,7 @@ def build_windows_watcher_install_script(debug_port: int) -> str:
     exe, _args, arguments, full_command = _watcher_command(debug_port)
     project_root = str(Path(__file__).resolve().parent.parent)
     run_key = WATCHER_RUN_KEY
+    lock_name = f"watcher-{debug_port}.lock"
     return f"""
 $ErrorActionPreference = 'Stop'
 $Exe = {_ps_quote(exe)}
@@ -56,6 +57,17 @@ $RunFullCommand = {_ps_quote(full_command)}
 $ProjectRoot = {_ps_quote(project_root)}
 $ShortcutName = {_ps_quote(WATCHER_STARTUP_SHORTCUT_NAME)}
 $WatcherModulePattern = {_ps_quote(_module_regex(WATCHER_MODULES))}
+$DataRoot = Join-Path $env:USERPROFILE '.codex-mate'
+$WatcherLockPath = Join-Path $DataRoot {_ps_quote(lock_name)}
+if (Test-Path $WatcherLockPath) {{
+    try {{
+        $LockPidText = (Get-Content -Path $WatcherLockPath -Raw -ErrorAction Stop).Trim()
+        if ($LockPidText -match '^\\d+$' -and [int]$LockPidText -ne $PID) {{
+            Stop-Process -Id ([int]$LockPidText) -Force -ErrorAction SilentlyContinue
+        }}
+    }} catch {{}}
+    Remove-Item $WatcherLockPath -Force -ErrorAction SilentlyContinue
+}}
 Get-CimInstance Win32_Process -Filter "Name='pythonw.exe' OR Name='python.exe' OR Name='CodexMate.exe'" | Where-Object {{ $_.CommandLine -match ($WatcherModulePattern + '\\s+(watch|launch)(\\s|$)') -or $_.CommandLine -match 'CodexMate(\\.exe)?\"?\\s+(watch|launch)(\\s|$)' }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }}
 if (-not (Test-Path {_ps_quote(run_key)})) {{ New-Item -Path {_ps_quote(run_key)} -Force | Out-Null }}
 Set-ItemProperty -Path {_ps_quote(run_key)} -Name '{WATCHER_RUN_NAME}' -Value $RunFullCommand
@@ -83,6 +95,16 @@ Remove-ItemProperty -Path '{WATCHER_RUN_KEY}' -Name '{WATCHER_RUN_NAME}' -ErrorA
 $Startup = [Environment]::GetFolderPath('Startup')
 $ShortcutPath = Join-Path $Startup {_ps_quote(WATCHER_STARTUP_SHORTCUT_NAME)}
 if (Test-Path $ShortcutPath) {{ Remove-Item $ShortcutPath -Force -ErrorAction SilentlyContinue }}
+$DataRoot = Join-Path $env:USERPROFILE '.codex-mate'
+Get-ChildItem -Path $DataRoot -Filter 'watcher-*.lock' -ErrorAction SilentlyContinue | ForEach-Object {{
+    try {{
+        $LockPidText = (Get-Content -Path $_.FullName -Raw -ErrorAction Stop).Trim()
+        if ($LockPidText -match '^\\d+$' -and [int]$LockPidText -ne $PID) {{
+            Stop-Process -Id ([int]$LockPidText) -Force -ErrorAction SilentlyContinue
+        }}
+    }} catch {{}}
+    Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue
+}}
 Get-CimInstance Win32_Process -Filter "Name='pythonw.exe' OR Name='python.exe' OR Name='CodexMate.exe'" | Where-Object {{ $_.CommandLine -match ($WatcherModulePattern + '\\s+(watch|launch)(\\s|$)') -or $_.CommandLine -match 'CodexMate(\\.exe)?\"?\\s+(watch|launch)(\\s|$)' }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }}
 """.strip()
 

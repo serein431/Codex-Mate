@@ -6,7 +6,7 @@
   const codexMateMenuId = "codex-mate-menu";
   const codexDeleteVersion = "5";
   const codexArchiveDeleteAllVersion = "2";
-  const codexMateVersion = "1.1.7";
+  const codexMateVersion = window.__CODEX_MATE_VERSION__ || "dev";
   const codexMateSettingsKey = "codexMateSettings";
 
   function installStyle() {

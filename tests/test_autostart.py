@@ -69,10 +69,21 @@ def test_build_windows_watcher_install_script_registers_run_and_startup_shortcut
     assert f"\nNew-Item -Path '{run_key}' -Force" not in script
     assert "Startup" in script
     assert "Stop-Process" in script
+    assert "watcher-9444.lock" in script
+    assert "Stop-Process -Id ([int]$LockPidText)" in script
+    assert "Remove-Item $WatcherLockPath" in script
     assert "codex_mate" in script
     assert "_".join(("codex", "session", "delete")) in script
     assert "CodexMate.exe" in script
     assert "codex_mate\\s+watch'" not in script
+
+
+def test_build_windows_watcher_uninstall_script_removes_lock_pid_watchers():
+    script = autostart.build_windows_watcher_uninstall_script()
+
+    assert "watcher-*.lock" in script
+    assert "Stop-Process -Id ([int]$LockPidText)" in script
+    assert "Remove-Item $_.FullName" in script
 
 
 def test_macos_watch_install_stops_legacy_watcher(monkeypatch, tmp_path):

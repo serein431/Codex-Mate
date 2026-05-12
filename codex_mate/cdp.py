@@ -10,6 +10,8 @@ from typing import Callable
 import requests
 import websocket
 
+from codex_mate import __version__
+
 
 BridgeHandler = Callable[[str, dict[str, object]], dict[str, object]]
 BRIDGE_BINDING_NAME = "codexMateV2"
@@ -90,7 +92,10 @@ def inject_file(port: int, script_path: Path, helper_port: int, handler: BridgeH
     websocket_url = str(target["webSocketDebuggerUrl"])
     bridge_socket = install_bridge(websocket_url, make_bridge_binding_name(), handler) if handler else None
     script = script_path.read_text(encoding="utf-8")
-    prefix = f"window.__CODEX_MATE_HELPER__ = 'http://127.0.0.1:{helper_port}';\n"
+    prefix = (
+        f"window.__CODEX_MATE_HELPER__ = {json.dumps(f'http://127.0.0.1:{helper_port}')};\n"
+        f"window.__CODEX_MATE_VERSION__ = {json.dumps(__version__)};\n"
+    )
     result = evaluate_script(websocket_url, prefix + script)
     return bridge_socket or result
 

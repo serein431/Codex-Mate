@@ -295,7 +295,8 @@ def test_renderer_script_does_not_include_fast_mode_patch():
     assert "setAuthMethod(\"chatgpt\")" in text
     assert "patchFastModeGateOnObject" not in text
     assert "Codex Mate" in text
-    assert "codexMateVersion = \"1.1.7\"" in text
+    assert "codexMateVersion = window.__CODEX_MATE_VERSION__ || \"dev\"" in text
+    assert "1.1.7" not in text
     assert "Codex Mate ${codexMateVersion}" in text
     assert "提出问题" in text
     assert "https://github.com/serein431/Codex-Mate/issues" in text

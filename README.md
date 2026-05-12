@@ -181,7 +181,8 @@ setup.bat
 [1] Install Codex Mate
 [2] Uninstall Codex Mate
 [3] Update Codex Mate
-[4] Exit
+[4] Export diagnostic logs
+[5] Exit
 ```
 
 命令行安装：
@@ -345,6 +346,8 @@ https://api.github.com/repos/serein431/Codex-Mate/releases/latest
 
 发现新版后会优先下载 Release 里的 `.whl` 或源码包，并重新执行安装流程。Windows 平台包也可以打开 `setup.bat` 选择 `[3] Update Codex Mate`，脚本会下载最新 `CodexMate-windows.zip`、替换本地 `CodexMate.exe` 并重新安装 watcher。macOS 平台包仍建议下载最新 `CodexMate-macos.zip` 后重新运行 `setup.command`。
 
+如果 Windows 用户升级后面板里仍显示旧版本，通常说明正在启动旧文件夹里的 `CodexMate.exe`，或旧 watcher 还没退出。最稳的处理方式是：关闭 Codex，重新下载最新 `CodexMate-windows.zip`，解压到一个干净目录，再双击里面的 `setup.bat` 选择 `[1] Install Codex Mate`。
+
 卸载：
 
 ```bash
@@ -435,6 +438,10 @@ Windows / macOS 平台安装包也可以直接打开 `setup.bat` 或 `setup.comm
 ### 原生 Codex 打开后又自动关闭
 
 这是透明接管在工作。watcher 发现当前 Codex 没有以增强参数启动，就会关闭它并重新通过 Codex Mate 启动。
+
+### 面板里显示的版本不是最新
+
+先确认你打开的是最新 Release 解压出来的 `setup.bat`。如果仍显示旧版本，关闭 Codex 后重新下载最新平台安装包，解压到新目录，再运行 `[1] Install Codex Mate`。旧版本的 Windows 更新脚本可能只更新了后台包，没有替换正在使用的可执行文件。
 
 ### 切换账号后历史还是没显示
 
