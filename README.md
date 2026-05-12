@@ -253,6 +253,8 @@ Codex Mate 会在启动前读取：
 - `~/.codex/session_index.jsonl`
 - `~/.codex/.codex-global-state.json`
 
+如果 `config.toml` 里没有显式写 `model_provider`，Codex Mate 会按官方默认 provider `openai` 处理。部分切换工具在切回官方模型时只写 `model`，这种情况下也可以直接运行 `history-sync` 恢复历史显示。
+
 其中 `.codex-global-state.json` 是 Codex Desktop 侧边栏会用到的本地 UI 索引。重新登录账号、退出登录再登录、或 Codex Desktop 更新后，如果本地数据库和会话文件还在，但侧边栏变空，通常就是这类索引和当前桌面状态脱节。Codex Mate 会补齐非归档会话的可见索引和工作区提示，让旧会话重新出现在 Desktop 侧边栏里。
 
 查看状态：

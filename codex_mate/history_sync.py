@@ -12,6 +12,7 @@ from typing import Iterator
 
 
 UTC = timezone.utc
+DEFAULT_MODEL_PROVIDER = "openai"
 
 
 @dataclass(frozen=True)
@@ -57,9 +58,7 @@ def environment_missing_reason(paths: HistoryPaths) -> str | None:
 
 def read_current_profile(paths: HistoryPaths) -> CurrentProfile:
     config = tomllib.loads(paths.config_path.read_text(encoding="utf-8"))
-    provider = str(config.get("model_provider") or "").strip()
-    if not provider:
-        raise RuntimeError(f"Missing model_provider in {paths.config_path}")
+    provider = str(config.get("model_provider") or DEFAULT_MODEL_PROVIDER).strip()
     model = config.get("model")
     return CurrentProfile(provider=provider, model=str(model).strip() if model else None)
 

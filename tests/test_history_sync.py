@@ -15,6 +15,11 @@ def write_config(home: Path, provider: str = "current_provider", model: str = "g
     )
 
 
+def write_openai_default_config(home: Path, model: str = "gpt-current") -> None:
+    home.mkdir(parents=True, exist_ok=True)
+    (home / "config.toml").write_text(f'model = "{model}"\n', encoding="utf-8")
+
+
 def create_threads_db(home: Path) -> None:
     conn = sqlite3.connect(home / "state_5.sqlite")
     try:
@@ -125,6 +130,29 @@ def test_sync_history_rehomes_database_sessions_and_index(tmp_path):
     index_entries = [json.loads(line) for line in (home / "session_index.jsonl").read_text(encoding="utf-8").splitlines()]
     assert [entry["id"] for entry in index_entries] == ["old-thread", "already-current"]
     assert index_entries[0]["thread_name"] == "Old Thread"
+
+
+def test_sync_history_defaults_to_openai_when_model_provider_is_missing(tmp_path):
+    home = tmp_path / ".codex"
+    write_openai_default_config(home, model="gpt-current")
+    create_threads_db(home)
+    session_path = write_session_file(home, "old-thread", "old_provider", "gpt-old")
+    paths = history_sync.resolve_paths(home)
+
+    result = history_sync.sync_history_to_current_profile(paths)
+
+    assert result["current_provider"] == "openai"
+    assert result["updated_database_rows"] == 3
+    with sqlite3.connect(home / "state_5.sqlite") as conn:
+        rows = conn.execute(
+            "SELECT model_provider, model, COUNT(*) FROM threads GROUP BY model_provider, model"
+        ).fetchall()
+    assert rows == [("openai", "gpt-current", 3)]
+
+    first_line = session_path.read_text(encoding="utf-8").splitlines()[0]
+    payload = json.loads(first_line)["payload"]
+    assert payload["model_provider"] == "openai"
+    assert payload["model"] == "gpt-current"
 
 
 def test_sync_history_preserves_existing_index_entries_with_session_file(tmp_path):
