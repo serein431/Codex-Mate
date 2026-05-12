@@ -75,7 +75,11 @@ goto end
 echo.
 echo Updating Codex Mate from GitHub Release...
 if exist "%CODEX_MATE_EXE%" (
-    echo Bundled executable installs are updated by downloading the latest CodexMate-windows.zip and running setup.bat again.
+    echo Using bundled CodexMate.exe.
+    echo Stopping transparent watcher before replacing files...
+    "%CODEX_MATE_EXE%" watch-remove >nul 2>nul
+    echo Downloading and applying latest CodexMate-windows.zip...
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $Root=(Resolve-Path '.').Path; $Headers=@{'User-Agent'='Codex Mate setup.bat'}; $Release=Invoke-RestMethod -Uri 'https://api.github.com/repos/serein431/Codex-Mate/releases/latest' -Headers $Headers; $Asset=$Release.assets | Where-Object { $_.name -eq 'CodexMate-windows.zip' } | Select-Object -First 1; if (-not $Asset) { throw 'CodexMate-windows.zip not found in latest release.' }; $Temp=Join-Path $env:TEMP ('CodexMateUpdate-' + [guid]::NewGuid().ToString('N')); New-Item -ItemType Directory -Force -Path $Temp | Out-Null; $Zip=Join-Path $Temp 'CodexMate-windows.zip'; Invoke-WebRequest -Uri $Asset.browser_download_url -OutFile $Zip -Headers $Headers; Expand-Archive -Path $Zip -DestinationPath $Temp -Force; $Package=Join-Path $Temp 'CodexMate'; if (-not (Test-Path (Join-Path $Package 'CodexMate.exe'))) { throw 'Downloaded package is missing CodexMate.exe.' }; Copy-Item -Path (Join-Path $Package 'CodexMate.exe') -Destination $Root -Force; if (Test-Path (Join-Path $Package 'README.md')) { Copy-Item -Path (Join-Path $Package 'README.md') -Destination $Root -Force }; & (Join-Path $Root 'CodexMate.exe') setup; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; Remove-Item $Temp -Recurse -Force -ErrorAction SilentlyContinue"
 ) else (
     %CODEX_MATE_PY% update
 )

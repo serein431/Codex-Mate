@@ -343,7 +343,7 @@ python -m codex_mate update
 https://api.github.com/repos/serein431/Codex-Mate/releases/latest
 ```
 
-发现新版后会优先下载 Release 里的 `.whl` 或源码包，并重新执行安装流程。平台安装包中的独立可执行文件会提示下载最新 `CodexMate-windows.zip` / `CodexMate-macos.zip`，避免在运行中替换自身导致安装中断。
+发现新版后会优先下载 Release 里的 `.whl` 或源码包，并重新执行安装流程。Windows 平台包也可以打开 `setup.bat` 选择 `[3] Update Codex Mate`，脚本会下载最新 `CodexMate-windows.zip`、替换本地 `CodexMate.exe` 并重新安装 watcher。macOS 平台包仍建议下载最新 `CodexMate-macos.zip` 后重新运行 `setup.command`。
 
 卸载：
 

@@ -96,7 +96,8 @@ def test_readme_describes_in_app_update_controls():
     assert "检查更新" in text
     assert "一键更新" in text
     assert "Codex Mate` 面板" in text
-    assert "运行中替换自身" in text
+    assert "setup.bat` 选择 `[3] Update Codex Mate`" in text
+    assert "CodexMate-windows.zip" in text
 
 
 def test_readme_thanks_related_projects_at_end():

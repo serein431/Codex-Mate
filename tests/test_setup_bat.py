@@ -18,3 +18,16 @@ def test_setup_bat_offers_install_and_uninstall_choices():
     assert "%CODEX_MATE_PY% update" in text
     assert "%CODEX_MATE_PY% logs" in text
     assert "pause" in text.lower()
+
+
+def test_setup_bat_binary_update_downloads_and_applies_windows_package():
+    text = Path("setup.bat").read_text(encoding="utf-8")
+
+    assert "Bundled executable installs are updated by downloading" not in text
+    assert "watch-remove" in text
+    assert "Invoke-RestMethod" in text
+    assert "CodexMate-windows.zip" in text
+    assert "Invoke-WebRequest" in text
+    assert "Expand-Archive" in text
+    assert "Copy-Item" in text
+    assert "CodexMate.exe') setup" in text

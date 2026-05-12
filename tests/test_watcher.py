@@ -142,6 +142,34 @@ def test_spawn_launcher_windows_flags_are_cross_platform_safe(monkeypatch, tmp_p
     assert calls[0][1]["env"]["PYINSTALLER_RESET_ENVIRONMENT"] == "1"
 
 
+def test_spawn_launcher_passes_app_dir_to_launch_command(monkeypatch, tmp_path):
+    calls = []
+    app_dir = Path("C:/Program Files/WindowsApps/OpenAI.Codex_26.506.1.0_x64__abc/app")
+    fake_python = tmp_path / "python.exe"
+    monkeypatch.setattr(watcher.sys, "platform", "win32")
+    monkeypatch.setattr(watcher.sys, "executable", str(fake_python))
+    monkeypatch.setattr(watcher.subprocess, "Popen", lambda args, **kwargs: calls.append((args, kwargs)) or object())
+
+    watcher.spawn_launcher(app_dir)
+
+    assert calls[0][0] == [
+        str(fake_python),
+        "-m",
+        "codex_mate",
+        "launch",
+        "--app-dir",
+        str(app_dir),
+        "--no-history-sync",
+    ]
+
+
+def test_parse_windows_codex_process_details_extracts_pid_and_app_dir():
+    output = "123\tC:/Users/me/AppData/Local/Codex/app/Codex.exe\nbad\tC:/bad/Codex.exe\n456\t\n"
+
+    assert watcher.parse_windows_codex_process_details(output) == [(123, Path("C:/Users/me/AppData/Local/Codex/app/Codex.exe"))]
+    assert watcher.windows_codex_app_dir_from_details([(123, Path("C:/Users/me/AppData/Local/Codex/app/Codex.exe"))], [123]) == Path("C:/Users/me/AppData/Local/Codex/app")
+
+
 def test_stop_launcher_processes_cleans_legacy_macos_module(monkeypatch):
     calls = []
     monkeypatch.setattr(watcher.sys, "platform", "darwin")
@@ -201,13 +229,15 @@ def test_attach_to_running_codex_starts_helper_without_killing_codex(monkeypatch
         def poll(self):
             return None
 
+    monkeypatch.setattr(watcher.sys, "platform", "win32")
     monkeypatch.setattr(watcher, "stop_launcher_processes", lambda: events.append(("stop-launchers", [])))
-    monkeypatch.setattr(watcher, "spawn_launcher", lambda: events.append(("spawn", [])) or Proc())
+    monkeypatch.setattr(watcher, "find_windows_codex_app_dir", lambda: Path("C:/Codex/app"))
+    monkeypatch.setattr(watcher, "spawn_launcher", lambda app_dir=None: events.append(("spawn", [app_dir])) or Proc())
     monkeypatch.setattr(watcher, "wait_for_helper", lambda port: events.append(("wait-helper", [port])) or True)
     monkeypatch.setattr(watcher, "kill_processes", lambda pids, force=False: events.append(("kill", list(pids))))
 
     assert watcher.attach_to_running_codex(helper_port=57321) is True
-    assert events == [("stop-launchers", []), ("spawn", []), ("wait-helper", [57321])]
+    assert events == [("stop-launchers", []), ("spawn", [Path("C:/Codex/app")]), ("wait-helper", [57321])]
 
 
 def test_wait_for_takeover_grace_skips_when_cdp_appears(monkeypatch):
@@ -270,7 +300,8 @@ def test_takeover_failure_leaves_codex_processes_running(monkeypatch):
     class Proc:
         pid = 456
 
-    monkeypatch.setattr(watcher, "spawn_launcher", lambda: Proc())
+    monkeypatch.setattr(watcher, "find_windows_codex_app_dir", lambda pids=None: Path("C:/Codex/app"))
+    monkeypatch.setattr(watcher, "spawn_launcher", lambda app_dir=None: Proc())
     monkeypatch.setattr(watcher, "wait_for_cdp", lambda port: False)
     monkeypatch.setattr(watcher.time, "sleep", lambda seconds: None)
 
@@ -291,10 +322,49 @@ def test_takeover_requires_helper_after_cdp(monkeypatch):
         def poll(self):
             return None
 
-    monkeypatch.setattr(watcher, "spawn_launcher", lambda: Proc())
+    monkeypatch.setattr(watcher, "find_windows_codex_app_dir", lambda pids=None: Path("C:/Codex/app"))
+    monkeypatch.setattr(watcher, "spawn_launcher", lambda app_dir=None: Proc())
     monkeypatch.setattr(watcher, "wait_for_cdp", lambda port: True)
     monkeypatch.setattr(watcher, "wait_for_helper", lambda port: False)
     monkeypatch.setattr(watcher.time, "sleep", lambda seconds: None)
 
     assert watcher.takeover(debug_port=9229) is False
     assert events == [("stop-launchers", []), ("kill", [123]), ("stop-launchers", [])]
+
+
+def test_takeover_passes_running_codex_app_dir_before_killing(monkeypatch):
+    events = []
+    app_dir = Path("C:/Program Files/WindowsApps/OpenAI.Codex_26.506.1.0_x64__abc/app")
+
+    class Proc:
+        pid = 456
+
+        def poll(self):
+            return None
+
+    monkeypatch.setattr(watcher.sys, "platform", "win32")
+    monkeypatch.setattr(watcher, "stop_launcher_processes", lambda: events.append(("stop-launchers", [])))
+    monkeypatch.setattr(watcher, "find_codex_processes", lambda: [123])
+    monkeypatch.setattr(watcher, "find_windows_codex_app_dir", lambda pids=None: app_dir)
+    monkeypatch.setattr(watcher, "kill_processes", lambda pids, force=False: events.append(("kill", list(pids))))
+    monkeypatch.setattr(watcher, "wait_until_no_codex", lambda timeout=watcher.KILL_WAIT_TIMEOUT_SECONDS: True)
+    monkeypatch.setattr(watcher, "spawn_launcher", lambda launch_app_dir=None: events.append(("spawn", [launch_app_dir])) or Proc())
+    monkeypatch.setattr(watcher, "wait_for_cdp", lambda port: True)
+    monkeypatch.setattr(watcher, "wait_for_helper", lambda port: True)
+    monkeypatch.setattr(watcher.time, "sleep", lambda seconds: None)
+
+    assert watcher.takeover(debug_port=9229) is True
+    assert events == [("stop-launchers", []), ("kill", [123]), ("spawn", [app_dir])]
+
+
+def test_takeover_skips_kill_when_windows_app_dir_is_unknown(monkeypatch):
+    events = []
+    monkeypatch.setattr(watcher.sys, "platform", "win32")
+    monkeypatch.setattr(watcher, "stop_launcher_processes", lambda: events.append(("stop-launchers", [])))
+    monkeypatch.setattr(watcher, "find_codex_processes", lambda: [123])
+    monkeypatch.setattr(watcher, "find_windows_codex_app_dir", lambda pids=None: None)
+    monkeypatch.setattr(watcher, "kill_processes", lambda pids, force=False: events.append(("kill", list(pids))))
+    monkeypatch.setattr(watcher, "spawn_launcher", lambda app_dir=None: events.append(("spawn", [app_dir])) or object())
+
+    assert watcher.takeover(debug_port=9229) is False
+    assert events == [("stop-launchers", [])]

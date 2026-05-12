@@ -138,13 +138,40 @@ def _parse_pids(output: str) -> list[int]:
     return [int(line) for line in output.splitlines() if line.strip().isdigit()]
 
 
-def find_windows_codex_processes() -> list[int]:
+def parse_windows_codex_process_details(output: str) -> list[tuple[int, Path]]:
+    details: list[tuple[int, Path]] = []
+    for line in output.splitlines():
+        pid_text, separator, executable = line.strip().partition("\t")
+        if not separator or not pid_text.isdigit() or not executable.strip():
+            continue
+        details.append((int(pid_text), Path(executable.strip())))
+    return details
+
+
+def find_windows_codex_process_details() -> list[tuple[int, Path]]:
     script = (
         "Get-CimInstance Win32_Process -Filter \"Name='Codex.exe' OR Name='codex.exe'\" "
-        "| Select-Object -ExpandProperty ProcessId"
+        "| ForEach-Object { [string]$_.ProcessId + \"`t\" + [string]$_.ExecutablePath }"
     )
-    output = _run_powershell(script)
-    return _parse_pids(output)
+    return parse_windows_codex_process_details(_run_powershell(script))
+
+
+def windows_codex_app_dir_from_details(details: list[tuple[int, Path]], pids: list[int] | None = None) -> Path | None:
+    wanted = set(pids or [])
+    for pid, executable in details:
+        if wanted and pid not in wanted:
+            continue
+        if executable.name.lower() == "codex.exe":
+            return executable.parent
+    return None
+
+
+def find_windows_codex_app_dir(pids: list[int] | None = None) -> Path | None:
+    return windows_codex_app_dir_from_details(find_windows_codex_process_details(), pids)
+
+
+def find_windows_codex_processes() -> list[int]:
+    return [pid for pid, _executable in find_windows_codex_process_details()]
 
 
 def find_macos_codex_processes() -> list[int]:
@@ -274,8 +301,12 @@ def wait_for_takeover_grace(port: int, observed_pids: list[int], grace_seconds: 
         time.sleep(min(0.25, remaining))
 
 
-def spawn_launcher() -> subprocess.Popen | None:
-    args = runtime.command_args("launch", "--no-history-sync", prefer_pythonw=True)
+def spawn_launcher(app_dir: Path | None = None) -> subprocess.Popen | None:
+    launch_args = ["launch"]
+    if app_dir is not None:
+        launch_args.extend(["--app-dir", str(app_dir)])
+    launch_args.append("--no-history-sync")
+    args = runtime.command_args(*launch_args, prefer_pythonw=True)
     popen_kwargs = {
         "stdin": subprocess.DEVNULL,
         "stdout": subprocess.DEVNULL,
@@ -301,7 +332,8 @@ def spawn_launcher() -> subprocess.Popen | None:
 def attach_to_running_codex(helper_port: int = DEFAULT_HELPER_PORT) -> bool:
     """Start the launcher/helper for a Codex process that already has CDP enabled."""
     stop_launcher_processes()
-    proc = spawn_launcher()
+    app_dir = find_windows_codex_app_dir() if sys.platform == "win32" else None
+    proc = spawn_launcher(app_dir)
     if proc is None:
         return False
     if wait_for_helper(helper_port) and process_is_running(proc):
@@ -338,7 +370,7 @@ def stop_launcher_processes() -> None:
     _run_powershell(script, timeout=6.0)
 
 
-def takeover(debug_port: int) -> bool:
+def takeover(debug_port: int, app_dir: Path | None = None) -> bool:
     """Perform one atomic takeover attempt: kill codex cleanly, spawn launcher, wait for CDP.
 
     Returns True on success (CDP up), False otherwise. On failure, caller should back off briefly.
@@ -346,29 +378,39 @@ def takeover(debug_port: int) -> bool:
     # Step 1: Kill existing launcher processes (stale / failed) so we start from a known state.
     stop_launcher_processes()
 
-    # Step 2: Kill all Codex.exe and wait for them to disappear.
+    # Step 2: Resolve the Codex executable while the original process is still alive.
+    # Some Windows installs are not discoverable via Get-AppxPackage, so the
+    # running process path is the most reliable launch target.
     pids = find_codex_processes()
+    launch_app_dir = app_dir
+    if sys.platform == "win32" and launch_app_dir is None:
+        launch_app_dir = find_windows_codex_app_dir(pids)
+        if launch_app_dir is None:
+            log("takeover: Codex app directory could not be determined from the running process; skipping takeover")
+            return False
+
+    # Step 3: Kill all Codex.exe and wait for them to disappear.
     log(f"takeover: killing {len(pids)} codex pid(s): {pids}")
     kill_processes(pids)
     if not wait_until_no_codex():
         log("takeover: codex processes did not exit in time, aborting this attempt")
         return False
 
-    # Step 3: Give AppX activation machinery a moment to reset the "app is running" state.
+    # Step 4: Give AppX activation machinery a moment to reset the "app is running" state.
     time.sleep(1.5)
 
-    # Step 4: Spawn a fresh launcher that will activate the packaged app with CDP args.
-    proc = spawn_launcher()
+    # Step 5: Spawn a fresh launcher that will activate the packaged app with CDP args.
+    proc = spawn_launcher(launch_app_dir)
     if proc is None:
         return False
 
-    # Step 5: Wait for CDP and helper to come up. CDP alone is not enough:
+    # Step 6: Wait for CDP and helper to come up. CDP alone is not enough:
     # without the helper server, injected buttons render but cannot perform work.
     if wait_for_cdp(debug_port) and wait_for_helper(DEFAULT_HELPER_PORT) and process_is_running(proc):
         log(f"takeover: CDP is up on {debug_port}, helper is up on {DEFAULT_HELPER_PORT} (launcher pid={proc.pid})")
         return True
 
-    # Step 6: CDP/helper did not come up. Stop only the helper launcher and
+    # Step 7: CDP/helper did not come up. Stop only the helper launcher and
     # leave Codex itself alone so the user can keep using the original app.
     log("takeover: CDP/helper did not come up in time; stopping launcher and leaving Codex running")
     stop_launcher_processes()
