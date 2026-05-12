@@ -47,6 +47,7 @@ def watcher_stderr_log_path() -> Path:
 def build_windows_watcher_install_script(debug_port: int) -> str:
     exe, _args, arguments, full_command = _watcher_command(debug_port)
     project_root = str(Path(__file__).resolve().parent.parent)
+    run_key = WATCHER_RUN_KEY
     return f"""
 $ErrorActionPreference = 'Stop'
 $Exe = {_ps_quote(exe)}
@@ -56,8 +57,8 @@ $ProjectRoot = {_ps_quote(project_root)}
 $ShortcutName = {_ps_quote(WATCHER_STARTUP_SHORTCUT_NAME)}
 $WatcherModulePattern = {_ps_quote(_module_regex(WATCHER_MODULES))}
 Get-CimInstance Win32_Process -Filter "Name='pythonw.exe' OR Name='python.exe' OR Name='CodexMate.exe'" | Where-Object {{ $_.CommandLine -match ($WatcherModulePattern + '\\s+(watch|launch)(\\s|$)') -or $_.CommandLine -match 'CodexMate(\\.exe)?\"?\\s+(watch|launch)(\\s|$)' }} | ForEach-Object {{ Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }}
-New-Item -Path '{WATCHER_RUN_KEY}' -Force | Out-Null
-Set-ItemProperty -Path '{WATCHER_RUN_KEY}' -Name '{WATCHER_RUN_NAME}' -Value $RunFullCommand
+if (-not (Test-Path {_ps_quote(run_key)})) {{ New-Item -Path {_ps_quote(run_key)} -Force | Out-Null }}
+Set-ItemProperty -Path {_ps_quote(run_key)} -Name '{WATCHER_RUN_NAME}' -Value $RunFullCommand
 $Startup = [Environment]::GetFolderPath('Startup')
 New-Item -ItemType Directory -Force -Path $Startup | Out-Null
 $Shell = New-Object -ComObject WScript.Shell
@@ -69,7 +70,7 @@ $Shortcut.WorkingDirectory = $ProjectRoot
 $Shortcut.WindowStyle = 7
 $Shortcut.Description = 'Codex Mate watcher (auto-inject Codex on start)'
 $Shortcut.Save()
-$runValue = (Get-ItemProperty -Path '{WATCHER_RUN_KEY}' -Name '{WATCHER_RUN_NAME}').'{WATCHER_RUN_NAME}'
+$runValue = (Get-ItemProperty -Path {_ps_quote(run_key)} -Name '{WATCHER_RUN_NAME}').'{WATCHER_RUN_NAME}'
 Write-Output ("watch-install: HKCU Run = " + $runValue)
 Write-Output ("watch-install: Startup shortcut = " + $ShortcutPath)
 """.strip()
