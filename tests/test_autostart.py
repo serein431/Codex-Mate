@@ -56,6 +56,7 @@ def test_write_macos_launch_agent_creates_valid_plist(tmp_path, monkeypatch):
 
 def test_build_windows_watcher_install_script_registers_run_and_startup_shortcut():
     script = autostart.build_windows_watcher_install_script(debug_port=9444)
+    run_key = "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"
 
     assert "CodexMateWatcher" in script
     assert "CodexMateWatcher.lnk" in script
@@ -63,7 +64,9 @@ def test_build_windows_watcher_install_script_registers_run_and_startup_shortcut
     assert LEGACY_OWNER not in script
     assert LEGACY_PROJECT not in script
     assert "-m codex_mate watch --debug-port 9444" in script
-    assert "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" in script
+    assert run_key in script
+    assert f"if (-not (Test-Path '{run_key}'))" in script
+    assert f"\nNew-Item -Path '{run_key}' -Force" not in script
     assert "Startup" in script
     assert "Stop-Process" in script
     assert "codex_mate" in script
