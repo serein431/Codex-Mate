@@ -340,3 +340,30 @@ def test_renderer_script_does_not_include_fast_mode_patch():
     assert "codexMateMenuVersion = \"5\"" in text
     assert "codexMateTriggerInstalled = \"5\"" in text
     assert ".codex-mate-trigger:hover" not in text
+
+
+def test_renderer_script_refreshes_existing_menu_label_before_reusing_trigger():
+    text = Path("codex_mate/inject/renderer-inject.js").read_text(encoding="utf-8")
+    start = text.index("function configureCodexMateTrigger")
+    end = text.index("\n\n  function installCodexMateMenu", start)
+    configure_code = text[start:end]
+
+    assert "function codexMateTriggerLabel()" in text
+    assert "trigger.textContent = codexMateTriggerLabel()" in configure_code
+    assert configure_code.index("trigger.textContent = codexMateTriggerLabel()") < configure_code.index(
+        'if (trigger.dataset.codexMateTriggerInstalled === "5") return'
+    )
+
+
+def test_renderer_script_syncs_displayed_version_after_successful_update():
+    text = Path("codex_mate/inject/renderer-inject.js").read_text(encoding="utf-8")
+    sync_start = text.index("function syncCodexMateDisplayedVersion")
+    sync_end = text.index("\n\n  function updateStatusText", sync_start)
+    sync_code = text[sync_start:sync_end]
+
+    assert "let codexMateVersion = window.__CODEX_MATE_VERSION__ || \"dev\"" in text
+    assert "codexMateVersion = nextVersion" in sync_code
+    assert "installCodexMateMenu()" in sync_code
+    assert "document.querySelectorAll(\".codex-mate-modal-title\")" in sync_code
+    assert 'if (payload?.status === "updated")' in sync_code
+    assert "syncCodexMateDisplayedVersion(payload.latest_version)" in sync_code

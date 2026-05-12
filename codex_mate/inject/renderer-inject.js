@@ -6,7 +6,7 @@
   const codexMateMenuId = "codex-mate-menu";
   const codexDeleteVersion = "5";
   const codexArchiveDeleteAllVersion = "2";
-  const codexMateVersion = window.__CODEX_MATE_VERSION__ || "dev";
+  let codexMateVersion = window.__CODEX_MATE_VERSION__ || "dev";
   const codexMateSettingsKey = "codexMateSettings";
 
   function installStyle() {
@@ -271,6 +271,22 @@
     scan();
   }
 
+  function syncCodexMateDisplayedVersion(version) {
+    const nextVersion = String(version || "").trim();
+    if (!nextVersion || nextVersion === codexMateVersion) return;
+    codexMateVersion = nextVersion;
+    installCodexMateMenu();
+    document.querySelectorAll(".codex-mate-modal-title").forEach((title) => {
+      title.textContent = codexMateTriggerLabel();
+    });
+  }
+
+  function syncCodexMateVersionFromPayload(payload) {
+    if (payload?.status === "updated") {
+      syncCodexMateDisplayedVersion(payload.latest_version);
+    }
+  }
+
   function updateStatusText(payload, fallback) {
     const message = payload?.message || fallback;
     const latest = payload?.latest_version && payload.latest_version !== codexMateVersion ? `（${payload.latest_version}）` : "";
@@ -278,6 +294,7 @@
   }
 
   function renderUpdateState(payload) {
+    syncCodexMateVersionFromPayload(payload);
     const status = document.querySelector("[data-codex-mate-update-status]");
     const updateButton = document.querySelector("[data-codex-mate-run-update]");
     if (!status || !updateButton) return;
@@ -409,9 +426,16 @@
     });
   }
 
+  function codexMateTriggerLabel() {
+    return `Codex Mate ${codexMateVersion}`;
+  }
+
   function configureCodexMateTrigger(menu, trigger, nativeButtonClass) {
     if (!trigger) return;
     if (nativeButtonClass) trigger.className = nativeButtonClass;
+    if ((trigger.textContent || "").trim() !== codexMateTriggerLabel()) {
+      trigger.textContent = codexMateTriggerLabel();
+    }
     if (trigger.dataset.codexMateTriggerInstalled === "5") return;
     trigger.dataset.codexMateTriggerInstalled = "5";
     trigger.addEventListener("click", (event) => {
@@ -439,7 +463,7 @@
     menu.dataset.codexMateMenuVersion = "5";
     const trigger = document.createElement("button");
     trigger.type = "button";
-    trigger.textContent = `Codex Mate ${codexMateVersion}`;
+    trigger.textContent = codexMateTriggerLabel();
     const nativeButtonClass = insertionPoint?.nativeButtonClass || "codex-mate-trigger";
     configureCodexMateTrigger(menu, trigger, nativeButtonClass);
     menu.appendChild(trigger);
