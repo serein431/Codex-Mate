@@ -305,6 +305,13 @@
     return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
   }
 
+  function retryableUpdateResult(result) {
+    if (result?.status === "failed" && !("can_update" in result)) {
+      return { ...result, can_update: true };
+    }
+    return result;
+  }
+
   async function checkCodexMateUpdate(button) {
     button.disabled = true;
     renderUpdateState({ message: "正在检查更新...", can_update: false });
@@ -323,7 +330,7 @@
     renderUpdateState({ message: "正在更新，请稍候...", can_update: true });
     try {
       const result = await withTimeout(postJson("/update", {}), 180000, "更新超时，请稍后重试。");
-      renderUpdateState(result);
+      renderUpdateState(retryableUpdateResult(result));
       showToast(result.message || (result.status === "updated" ? "更新完成" : "更新失败"), null);
     } catch (error) {
       const message = bridgeErrorMessage(error, "更新失败，请稍后重试。");

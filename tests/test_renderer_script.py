@@ -32,6 +32,9 @@ def test_renderer_script_contains_update_check_contract():
     assert "finally" in text
     assert "检查更新超时" in text
     assert "更新超时" in text
+    assert "retryableUpdateResult" in text
+    assert 'result?.status === "failed"' in text
+    assert 'can_update: true' in text
 
 
 def test_renderer_script_supports_codex_sidebar_thread_attributes():
