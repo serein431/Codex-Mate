@@ -280,20 +280,13 @@ def test_renderer_script_uses_chinese_delete_toast_fallbacks():
     assert "Undo finished" not in text
 
 
-def test_renderer_script_includes_project_file_tree_panel():
+def test_renderer_script_does_not_include_project_file_tree_panel():
     text = Path("codex_mate/inject/renderer-inject.js").read_text(encoding="utf-8")
 
-    assert "projectFileTree: true" in text
-    assert "项目文件树" in text
-    assert "codex-file-tree-panel" in text
-    assert "data-codex-file-tree-root-select" in text
-    assert "data-codex-file-tree-preview" in text
-    assert "data-codex-file-tree-copy-path" in text
-    assert "data-codex-file-tree-insert-path" in text
-    assert "/file-tree/roots" in text
-    assert "/file-tree/list" in text
-    assert "/file-tree/read" in text
-    assert "@${codexFileTreeState.selectedPath}" in text
+    assert "projectFileTree" not in text
+    assert "项目文件树" not in text
+    assert "codex-file-tree" not in text
+    assert "/file-tree/" not in text
 
 
 def test_renderer_script_delegated_clicks_tolerate_text_targets():
@@ -303,7 +296,6 @@ def test_renderer_script_delegated_clicks_tolerate_text_targets():
     assert 'closestElement(event.target, ".codex-mate-modal-close")' in text
     assert 'closestElement(event.target, "[data-codex-mate-setting]")' in text
     assert 'closestElement(event.target, "[data-codex-delete-confirm]")' in text
-    assert 'closestElement(event.target, "[data-codex-file-tree-copy-path]")' in text
     assert 'event.target.closest(".codex-mate-modal-close")' not in text
     assert 'event.target.closest("[data-codex-delete-confirm]")' not in text
 

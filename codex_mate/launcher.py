@@ -14,7 +14,6 @@ from codex_mate.app_paths import resolve_codex_app_dir
 from codex_mate.api_adapter import ApiAdapter, UnavailableApiAdapter
 from codex_mate.backup_store import BackupStore
 from codex_mate.cdp import inject_file, list_targets
-from codex_mate.file_tree import ProjectFileTreeService
 from codex_mate.helper_server import HelperServer
 from codex_mate.models import DeleteResult, DeleteStatus, SessionRef
 from codex_mate.storage_adapter import SQLiteStorageAdapter
@@ -25,7 +24,6 @@ class ApiFirstDeleteService:
     def __init__(self, api_adapter: ApiAdapter, db_path: Path | None, backup_dir: Path):
         self.api_adapter = api_adapter
         self.local_adapter = SQLiteStorageAdapter(db_path, BackupStore(backup_dir)) if db_path else None
-        self.file_tree = ProjectFileTreeService(db_path)
 
     def delete(self, session: SessionRef) -> DeleteResult:
         api_result = self.api_adapter.delete(session)
@@ -44,15 +42,6 @@ class ApiFirstDeleteService:
         if self.local_adapter is None:
             return None
         return self.local_adapter.find_archived_thread_by_title(title)
-
-    def file_tree_roots(self) -> dict[str, object]:
-        return self.file_tree.roots()
-
-    def file_tree_list(self, root_id: str, path: str) -> dict[str, object]:
-        return self.file_tree.list_dir(root_id, path)
-
-    def file_tree_read(self, root_id: str, path: str) -> dict[str, object]:
-        return self.file_tree.read_file(root_id, path)
 
     def check_update(self) -> dict[str, object]:
         if runtime.is_frozen():
@@ -507,10 +496,4 @@ def handle_bridge_request(service: ApiFirstDeleteService, path: str, payload: di
         return service.check_update()
     if path == "/update":
         return service.update()
-    if path == "/file-tree/roots":
-        return service.file_tree_roots()
-    if path == "/file-tree/list":
-        return service.file_tree_list(str(payload.get("root_id", "")), str(payload.get("path", "")))
-    if path == "/file-tree/read":
-        return service.file_tree_read(str(payload.get("root_id", "")), str(payload.get("path", "")))
     return {"status": DeleteStatus.FAILED.value, "session_id": str(payload.get("session_id", "")), "message": "Unknown bridge path"}

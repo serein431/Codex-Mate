@@ -1,6 +1,7 @@
 import json
 import threading
 import urllib.request
+from urllib.error import HTTPError
 
 from codex_mate.helper_server import HelperServer
 from codex_mate.models import DeleteResult, DeleteStatus, SessionRef
@@ -29,15 +30,6 @@ class FakeDeleteService:
 
     def update(self):
         return {"status": "updated", "latest_version": "v9.9.9"}
-
-    def file_tree_roots(self):
-        return {"status": "ok", "roots": [{"id": "r1", "name": "project", "path": "/project"}]}
-
-    def file_tree_list(self, root_id: str, path: str):
-        return {"status": "ok", "root_id": root_id, "path": path, "items": []}
-
-    def file_tree_read(self, root_id: str, path: str):
-        return {"status": "ok", "root_id": root_id, "path": path, "content": "hello"}
 
 
 def post_json(url, payload):
@@ -100,23 +92,22 @@ def test_helper_server_routes_update_actions():
     assert updated["status"] == "updated"
 
 
-def test_helper_server_routes_file_tree_actions():
+def test_helper_server_rejects_removed_file_tree_actions():
     service = FakeDeleteService()
     server = HelperServer("127.0.0.1", 0, service)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
         base = f"http://127.0.0.1:{server.port}"
-        roots = post_json(base + "/file-tree/roots", {})
-        listed = post_json(base + "/file-tree/list", {"root_id": "r1", "path": "src"})
-        read = post_json(base + "/file-tree/read", {"root_id": "r1", "path": "src/app.py"})
+        try:
+            post_json(base + "/file-tree/roots", {})
+        except HTTPError as exc:
+            assert exc.code == 404
+        else:
+            raise AssertionError("file tree endpoint should be removed")
     finally:
         server.shutdown()
         thread.join(timeout=3)
-
-    assert roots["roots"][0]["id"] == "r1"
-    assert listed == {"status": "ok", "root_id": "r1", "path": "src", "items": []}
-    assert read["content"] == "hello"
 
 
 def test_helper_server_allows_private_network_preflight():

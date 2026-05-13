@@ -13,9 +13,6 @@ class DeleteService(Protocol):
     def find_archived_thread_by_title(self, title: str) -> SessionRef | None: ...
     def check_update(self) -> dict[str, object]: ...
     def update(self) -> dict[str, object]: ...
-    def file_tree_roots(self) -> dict[str, object]: ...
-    def file_tree_list(self, root_id: str, path: str) -> dict[str, object]: ...
-    def file_tree_read(self, root_id: str, path: str) -> dict[str, object]: ...
 
 
 class HelperServer(ThreadingHTTPServer):
@@ -60,15 +57,6 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             if self.path == "/update":
                 self._send_json(self.server.service.update())
-                return
-            if self.path == "/file-tree/roots":
-                self._send_json(self.server.service.file_tree_roots())
-                return
-            if self.path == "/file-tree/list":
-                self._send_json(self.server.service.file_tree_list(str(payload.get("root_id", "")), str(payload.get("path", ""))))
-                return
-            if self.path == "/file-tree/read":
-                self._send_json(self.server.service.file_tree_read(str(payload.get("root_id", "")), str(payload.get("path", ""))))
                 return
             self._send_json({"error": "not found"}, status=404)
         except Exception as exc:

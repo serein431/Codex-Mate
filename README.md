@@ -21,7 +21,6 @@ Codex Mate 是一个给 Codex App 使用的本地增强工具。它通过外部 
 - 在会话列表悬停显示“删除”按钮
 - 删除前确认，并支持撤销
 - 切换账号、provider 或模型后，帮助恢复本机已有聊天记录的侧边栏显示
-- 右侧只读项目文件树，支持文本预览、复制路径和插入路径
 - 支持 Windows / macOS 安装、更新、卸载和诊断日志导出
 
 ## 目录
@@ -36,7 +35,6 @@ Codex Mate 是一个给 Codex App 使用的本地增强工具。它通过外部 
 - [使用效果](#使用效果)
 - [功能说明](#功能说明)
 - [历史同步](#历史同步)
-- [项目文件树](#项目文件树)
 - [透明接管](#透明接管)
 - [诊断日志](#诊断日志)
 - [常见问题](#常见问题)
@@ -287,27 +285,6 @@ python -m codex_mate history-sync --json
 python -m codex_mate launch --no-history-sync
 ```
 
-## 项目文件树
-
-Codex Mate 会根据 Codex 本地数据库里的 `threads.cwd` 找到 Codex 已知项目目录，并在右侧显示一个独立的只读文件树。
-
-文件树默认开启，可以在 Codex Mate 面板里关闭。
-
-支持：
-
-- 展开目录
-- 预览 UTF-8 文本文件
-- 复制相对路径
-- 把路径插入输入框，格式为 `@path/to/file`
-
-限制：
-
-- 只允许访问 Codex 已知项目目录内部的文件
-- 不提供任意磁盘浏览
-- 不预览二进制文件
-- 超过 256KB 的文件不会直接预览
-- 默认隐藏 `.git`、`node_modules`、`.venv`、`__pycache__`、`dist`、`build` 等目录
-
 ## 透明接管
 
 透明接管是可选能力。它的作用是让你不必记住“必须从 Codex Mate 启动”。
@@ -466,7 +443,6 @@ codex_mate/
   helper_server.py       本地 helper 服务
   storage_adapter.py     本地 SQLite 删除与撤销
   history_sync.py        本地历史 provider/model 同步
-  file_tree.py           项目文件树后端
   autostart.py           Windows/macOS watcher 自启注册
   watcher.py             透明接管进程
   inject/renderer-inject.js

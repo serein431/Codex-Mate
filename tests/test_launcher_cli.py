@@ -154,25 +154,11 @@ def test_bridge_routes_update_requests(tmp_path):
     assert launcher.handle_bridge_request(Service(), "/update", {}) == {"status": "updated"}
 
 
-def test_bridge_routes_file_tree_requests(tmp_path):
-    class Service:
-        def file_tree_roots(self):
-            return {"status": "ok", "roots": [{"id": "r1"}]}
+def test_bridge_rejects_removed_file_tree_requests(tmp_path):
+    payload = launcher.handle_bridge_request(object(), "/file-tree/roots", {})
 
-        def file_tree_list(self, root_id, path):
-            return {"status": "ok", "root_id": root_id, "path": path}
-
-        def file_tree_read(self, root_id, path):
-            return {"status": "ok", "root_id": root_id, "path": path, "content": "hello"}
-
-    assert launcher.handle_bridge_request(Service(), "/file-tree/roots", {}) == {"status": "ok", "roots": [{"id": "r1"}]}
-    assert launcher.handle_bridge_request(Service(), "/file-tree/list", {"root_id": "r1", "path": "src"}) == {"status": "ok", "root_id": "r1", "path": "src"}
-    assert launcher.handle_bridge_request(Service(), "/file-tree/read", {"root_id": "r1", "path": "src/app.py"}) == {
-        "status": "ok",
-        "root_id": "r1",
-        "path": "src/app.py",
-        "content": "hello",
-    }
+    assert payload["status"] == "failed"
+    assert payload["message"] == "Unknown bridge path"
 
 
 def test_launch_codex_windows_allows_devtools_websocket_origin(monkeypatch):
