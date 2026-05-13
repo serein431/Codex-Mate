@@ -48,6 +48,33 @@ def create_threads_db(home: Path) -> None:
         conn.close()
 
 
+def create_current_threads_db(home: Path) -> None:
+    conn = sqlite3.connect(home / "state_5.sqlite")
+    try:
+        conn.execute(
+            """
+            CREATE TABLE threads (
+                id TEXT PRIMARY KEY,
+                title TEXT,
+                updated_at INTEGER,
+                archived INTEGER DEFAULT 0,
+                model_provider TEXT,
+                model TEXT
+            )
+            """
+        )
+        conn.executemany(
+            "INSERT INTO threads (id, title, updated_at, archived, model_provider, model) VALUES (?, ?, ?, ?, ?, ?)",
+            [
+                ("current-thread", "Current Thread", 100, 0, "current_provider", "gpt-current"),
+                ("current-thread-2", "Current Thread 2", 200, 0, "current_provider", "gpt-current"),
+            ],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def create_threads_db_with_cwd(home: Path) -> None:
     conn = sqlite3.connect(home / "state_5.sqlite")
     try:
@@ -242,6 +269,36 @@ def test_sync_history_skips_when_codex_state_is_missing(tmp_path):
     assert result["ok"] is True
     assert result["skipped"] is True
     assert "missing" in result["reason"]
+
+
+def test_sync_history_if_ready_skips_when_profile_already_matches(tmp_path):
+    home = tmp_path / ".codex"
+    write_config(home)
+    create_current_threads_db(home)
+    paths = history_sync.resolve_paths(home)
+
+    result = history_sync.sync_history_if_ready(paths)
+
+    assert result["ok"] is True
+    assert result["skipped"] is True
+    assert result["mismatched_provider_threads"] == 0
+    assert result["mismatched_model_threads"] == 0
+    assert "backup_path" not in result
+    assert not (home / "codex_mate_history_backups").exists()
+
+
+def test_sync_history_if_ready_syncs_when_profile_mismatches(tmp_path):
+    home = tmp_path / ".codex"
+    write_config(home)
+    create_threads_db(home)
+    paths = history_sync.resolve_paths(home)
+
+    result = history_sync.sync_history_if_ready(paths)
+
+    assert result["ok"] is True
+    assert result["skipped"] is False
+    assert result["updated_database_rows"] == 2
+    assert Path(result["backup_path"]).exists()
 
 
 def test_sync_history_repairs_desktop_global_state_sidebar_indexes(tmp_path):

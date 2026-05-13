@@ -483,6 +483,15 @@ def sync_history_if_ready(paths: HistoryPaths) -> dict[str, object]:
     missing = environment_missing_reason(paths)
     if missing:
         return {"ok": True, "skipped": True, "reason": missing}
+    current_status = status(paths)
+    mismatched_provider = int(current_status.get("mismatched_provider_threads") or 0)
+    mismatched_model = int(current_status.get("mismatched_model_threads") or 0)
+    if mismatched_provider == 0 and mismatched_model == 0:
+        return {
+            **current_status,
+            "skipped": True,
+            "reason": "history already matches current provider/model",
+        }
     return sync_history_to_current_profile(paths)
 
 
