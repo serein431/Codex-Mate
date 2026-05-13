@@ -114,6 +114,34 @@ def test_download_asset_writes_release_file(monkeypatch, tmp_path):
     assert path.read_bytes() == b"abcdefg"
 
 
+def test_update_python_executable_uses_console_python_for_pythonw(monkeypatch, tmp_path):
+    pythonw = tmp_path / "pythonw.exe"
+    python = tmp_path / "python.exe"
+    pythonw.write_text("", encoding="utf-8")
+    python.write_text("", encoding="utf-8")
+    monkeypatch.setattr(updater.sys, "platform", "win32")
+
+    assert updater.update_python_executable(str(pythonw)) == str(python)
+
+
+def test_update_python_executable_keeps_pythonw_without_console_python(monkeypatch, tmp_path):
+    pythonw = tmp_path / "pythonw.exe"
+    pythonw.write_text("", encoding="utf-8")
+    monkeypatch.setattr(updater.sys, "platform", "win32")
+
+    assert updater.update_python_executable(str(pythonw)) == str(pythonw)
+
+
+def test_update_python_executable_keeps_non_windows_pythonw(monkeypatch, tmp_path):
+    pythonw = tmp_path / "pythonw.exe"
+    python = tmp_path / "python.exe"
+    pythonw.write_text("", encoding="utf-8")
+    python.write_text("", encoding="utf-8")
+    monkeypatch.setattr(updater.sys, "platform", "linux")
+
+    assert updater.update_python_executable(str(pythonw)) == str(pythonw)
+
+
 def test_perform_update_installs_downloaded_wheel_and_reruns_setup(monkeypatch, tmp_path):
     commands = []
     release = updater.Release(
@@ -135,6 +163,34 @@ def test_perform_update_installs_downloaded_wheel_and_reruns_setup(monkeypatch, 
     assert commands == [
         (["python.exe", "-m", "pip", "install", "--upgrade", str(wheel)], {"check": True}),
         (["python.exe", "-m", "codex_mate", "setup"], {"check": True, "cwd": updater.safe_setup_cwd()}),
+    ]
+
+
+def test_perform_update_uses_console_python_when_started_by_pythonw(monkeypatch, tmp_path):
+    commands = []
+    release = updater.Release(
+        version="v1.1.1",
+        url="https://github.com/serein431/Codex-Mate/releases/tag/v1.1.1",
+        body="fixes",
+        asset_name="pkg.whl",
+        asset_url="https://example.test/pkg.whl",
+    )
+    wheel = tmp_path / "pkg.whl"
+    wheel.write_bytes(b"wheel")
+    pythonw = tmp_path / "pythonw.exe"
+    python = tmp_path / "python.exe"
+    pythonw.write_text("", encoding="utf-8")
+    python.write_text("", encoding="utf-8")
+    monkeypatch.setattr(updater.sys, "platform", "win32")
+    monkeypatch.setattr(updater, "download_asset", lambda *args: wheel)
+    monkeypatch.setattr(updater.autostart, "windows_watcher_autostart_installed", lambda: False)
+    monkeypatch.setattr(updater.subprocess, "run", lambda command, **kwargs: commands.append((command, kwargs)))
+
+    updater.perform_update(release, python_executable=str(pythonw), download_dir=tmp_path)
+
+    assert commands == [
+        ([str(python), "-m", "pip", "install", "--upgrade", str(wheel)], {"check": True}),
+        ([str(python), "-m", "codex_mate", "setup"], {"check": True, "cwd": updater.safe_setup_cwd()}),
     ]
 
 

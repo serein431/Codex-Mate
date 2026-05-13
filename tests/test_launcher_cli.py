@@ -82,6 +82,33 @@ def test_update_service_runs_one_click_update(monkeypatch, tmp_path):
     assert calls == [release]
 
 
+def test_update_service_rejects_concurrent_update_attempts(monkeypatch, tmp_path):
+    release = updater.Release(
+        version="v9.9.9",
+        url="https://github.com/serein431/Codex-Mate/releases/tag/v9.9.9",
+        body="fixes",
+        asset_name="CodexMate.zip",
+        asset_url="https://example.test/CodexMate.zip",
+    )
+    started = []
+    service = launcher.ApiFirstDeleteService(launcher.UnavailableApiAdapter(), None, tmp_path)
+    monkeypatch.setattr(launcher.updater, "is_source_tree_mode", lambda: False)
+    monkeypatch.setattr(launcher.updater, "check_for_update", lambda: release)
+
+    def blocked_update(_release):
+        started.append(_release)
+        second = service.update()
+        assert second["status"] == "updating"
+        assert second["can_update"] is False
+
+    monkeypatch.setattr(launcher.updater, "perform_update", blocked_update)
+
+    payload = service.update()
+
+    assert payload["status"] == "updated"
+    assert started == [release]
+
+
 def test_update_service_reports_source_tree_migration(monkeypatch, tmp_path):
     release = updater.Release(
         version="v1.1.6",

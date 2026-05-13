@@ -144,6 +144,15 @@ def download_asset(url: str, name: str, download_dir: Path) -> Path:
     return path
 
 
+def update_python_executable(python_executable: str) -> str:
+    executable = Path(python_executable)
+    if sys.platform == "win32" and executable.name.lower() == "pythonw.exe":
+        console_python = executable.with_name("python.exe")
+        if console_python.exists():
+            return str(console_python)
+    return python_executable
+
+
 def perform_update(
     release: Release,
     *,
@@ -160,11 +169,12 @@ def perform_update(
 
 def _perform_update_in_dir(release: Release, python_executable: str, download_dir: Path) -> UpdateResult:
     restore_windows_watcher = autostart.windows_watcher_autostart_installed()
+    update_executable = update_python_executable(python_executable)
     package_path = download_asset(release.asset_url or "", release.asset_name or "", download_dir)
-    subprocess.run([python_executable, "-m", "pip", "install", "--upgrade", str(package_path)], check=True)
-    subprocess.run([python_executable, "-m", "codex_mate", "setup"], check=True, cwd=safe_setup_cwd())
+    subprocess.run([update_executable, "-m", "pip", "install", "--upgrade", str(package_path)], check=True)
+    subprocess.run([update_executable, "-m", "codex_mate", "setup"], check=True, cwd=safe_setup_cwd())
     if restore_windows_watcher:
-        subprocess.run([python_executable, "-m", "codex_mate", "watch-install"], check=True, cwd=safe_setup_cwd())
+        subprocess.run([update_executable, "-m", "codex_mate", "watch-install"], check=True, cwd=safe_setup_cwd())
     return UpdateResult(release=release, installed_path=package_path)
 
 

@@ -24,6 +24,7 @@ class ApiFirstDeleteService:
     def __init__(self, api_adapter: ApiAdapter, db_path: Path | None, backup_dir: Path):
         self.api_adapter = api_adapter
         self.local_adapter = SQLiteStorageAdapter(db_path, BackupStore(backup_dir)) if db_path else None
+        self._update_lock = threading.Lock()
 
     def delete(self, session: SessionRef) -> DeleteResult:
         api_result = self.api_adapter.delete(session)
@@ -92,28 +93,42 @@ class ApiFirstDeleteService:
         return self._release_payload("available", release, f"发现新版本 {release.version}。", can_update=True)
 
     def update(self) -> dict[str, object]:
+        if not self._update_lock.acquire(blocking=False):
+            return {
+                "status": "updating",
+                "current_version": __version__,
+                "latest_version": __version__,
+                "can_update": False,
+                "message": "已有更新任务正在进行，请等待当前更新完成。",
+            }
         if runtime.is_frozen():
-            release = updater.fetch_latest_release()
-            return self._release_payload(
-                "manual_required",
-                release,
-                "打包版需要下载安装包更新，请打开 Release 下载最新平台包。",
-                can_update=False,
-            )
-        if updater.is_source_tree_mode():
-            release = updater.fetch_latest_release()
-        else:
-            release = updater.check_for_update()
-            if release is None:
-                return {
-                    "status": "up_to_date",
-                    "current_version": __version__,
-                    "latest_version": __version__,
-                    "can_update": False,
-                    "message": "当前已是最新版本。",
-                }
-        updater.perform_update(release)
-        return self._release_payload("updated", release, f"已更新到 {release.version}，重启 Codex 后生效。", can_update=False)
+            try:
+                release = updater.fetch_latest_release()
+                return self._release_payload(
+                    "manual_required",
+                    release,
+                    "打包版需要下载安装包更新，请打开 Release 下载最新平台包。",
+                    can_update=False,
+                )
+            finally:
+                self._update_lock.release()
+        try:
+            if updater.is_source_tree_mode():
+                release = updater.fetch_latest_release()
+            else:
+                release = updater.check_for_update()
+                if release is None:
+                    return {
+                        "status": "up_to_date",
+                        "current_version": __version__,
+                        "latest_version": __version__,
+                        "can_update": False,
+                        "message": "当前已是最新版本。",
+                    }
+            updater.perform_update(release)
+            return self._release_payload("updated", release, f"已更新到 {release.version}，重启 Codex 后生效。", can_update=False)
+        finally:
+            self._update_lock.release()
 
     def _release_payload(self, status: str, release: updater.Release, message: str, *, can_update: bool) -> dict[str, object]:
         return {
