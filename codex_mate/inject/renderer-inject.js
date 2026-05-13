@@ -292,20 +292,46 @@
     updateButton.disabled = false;
   }
 
+  function bridgeErrorMessage(error, fallback) {
+    const message = error?.message || String(error || "");
+    return message || fallback;
+  }
+
+  function withTimeout(promise, timeoutMs, timeoutMessage) {
+    let timeoutId = null;
+    const timeout = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error(timeoutMessage)), timeoutMs);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
+  }
+
   async function checkCodexMateUpdate(button) {
     button.disabled = true;
     renderUpdateState({ message: "正在检查更新...", can_update: false });
-    const result = await postJson("/check-update", {});
-    renderUpdateState(result);
-    button.disabled = false;
+    try {
+      const result = await withTimeout(postJson("/check-update", {}), 15000, "检查更新超时，请稍后重试。");
+      renderUpdateState(result);
+    } catch (error) {
+      renderUpdateState({ status: "failed", message: bridgeErrorMessage(error, "检查更新失败，请稍后重试。"), can_update: false });
+    } finally {
+      button.disabled = false;
+    }
   }
 
   async function runCodexMateUpdate(button) {
     button.disabled = true;
     renderUpdateState({ message: "正在更新，请稍候...", can_update: true });
-    const result = await postJson("/update", {});
-    renderUpdateState(result);
-    showToast(result.message || (result.status === "updated" ? "更新完成" : "更新失败"), null);
+    try {
+      const result = await withTimeout(postJson("/update", {}), 180000, "更新超时，请稍后重试。");
+      renderUpdateState(result);
+      showToast(result.message || (result.status === "updated" ? "更新完成" : "更新失败"), null);
+    } catch (error) {
+      const message = bridgeErrorMessage(error, "更新失败，请稍后重试。");
+      renderUpdateState({ status: "failed", message, can_update: true });
+      showToast(message, null);
+    } finally {
+      button.disabled = false;
+    }
   }
 
   function renderCodexMateMenu() {
