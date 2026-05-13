@@ -20,14 +20,20 @@ def _launcher_command(options: "InstallOptions") -> str:
     if options.launcher_command:
         return options.launcher_command
     if is_frozen():
-        return command_string("launch", "--no-history-sync")
-    return "python -m codex_mate launch --no-history-sync"
+        return command_string("launch")
+    return "python -m codex_mate launch"
 
 
 def _install_root_expr(options: "InstallOptions") -> str:
     if options.install_root is not None:
         return _ps_quote(str(options.install_root))
     return "$([Environment]::GetFolderPath('Desktop'))"
+
+
+def install_root_path(options: "InstallOptions") -> Path:
+    if options.install_root is not None:
+        return options.install_root
+    return Path.home() / "Desktop"
 
 
 def _project_root_expr() -> str:
@@ -75,6 +81,74 @@ def _uninstall_command_expr(target: str, arguments: str) -> str:
     target_expr = "$Python" if target == "python" else _ps_quote(target)
     uninstall_arguments = _uninstall_arguments(arguments)
     return f"'cmd.exe /c cd /d \"' + $ProjectRoot + '\" && \"' + {target_expr} + '\" {uninstall_arguments} \"' + $InstallRoot + '\"'"
+
+
+def cmd_launcher_path(options: "InstallOptions") -> Path:
+    return install_root_path(options) / "Codex Mate.cmd"
+
+
+def write_cmd_launcher(options: "InstallOptions") -> Path:
+    install_root = install_root_path(options)
+    install_root.mkdir(parents=True, exist_ok=True)
+    project_root = command_root()
+    target, arguments = _split_launcher_command(_launcher_command(options))
+    launcher_path = cmd_launcher_path(options)
+    launcher_path.write_text(
+        "\n".join(
+            [
+                "@echo off",
+                f'cd /d "{project_root}"',
+                f'start "" "{target}" {arguments}'.rstrip(),
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return launcher_path
+
+
+def remove_cmd_launcher(options: "InstallOptions") -> None:
+    try:
+        cmd_launcher_path(options).unlink()
+    except FileNotFoundError:
+        pass
+
+
+def register_windows_uninstall_entry(options: "InstallOptions", launcher_path: Path) -> None:
+    try:
+        import winreg
+    except ImportError:
+        return
+    try:
+        key_path = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\CodexMate"
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+            winreg.SetValueEx(key, "DisplayName", 0, winreg.REG_SZ, "Codex Mate")
+            winreg.SetValueEx(key, "DisplayVersion", 0, winreg.REG_SZ, __version__)
+            winreg.SetValueEx(key, "Publisher", 0, winreg.REG_SZ, "codex-mate")
+            winreg.SetValueEx(key, "InstallLocation", 0, winreg.REG_SZ, str(command_root()))
+            command = subprocess.list2cmdline([str(launcher_path)])
+            winreg.SetValueEx(key, "DisplayIcon", 0, winreg.REG_SZ, str(_icon_path_expr()).strip("'"))
+            winreg.SetValueEx(key, "UninstallString", 0, winreg.REG_SZ, command)
+            winreg.SetValueEx(key, "QuietUninstallString", 0, winreg.REG_SZ, command)
+    except OSError as exc:
+        print(f"warning: unable to register uninstall entry: {exc}")
+
+
+def unregister_windows_uninstall_entry() -> None:
+    try:
+        import winreg
+    except ImportError:
+        return
+    for key_path in (
+        r"Software\Microsoft\Windows\CurrentVersion\Uninstall\CodexMate",
+        r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Codex Mate",
+    ):
+        try:
+            winreg.DeleteKey(winreg.HKEY_CURRENT_USER, key_path)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            print(f"warning: unable to remove uninstall entry: {exc}")
 
 
 def build_install_shortcut_script(options: "InstallOptions") -> str:
@@ -135,8 +209,19 @@ def _run_powershell(script: str) -> None:
 
 
 def install_windows_shortcuts(options: "InstallOptions") -> None:
-    _run_powershell(build_install_shortcut_script(options))
+    try:
+        _run_powershell(build_install_shortcut_script(options))
+    except PermissionError as exc:
+        launcher_path = write_cmd_launcher(options)
+        register_windows_uninstall_entry(options, launcher_path)
+        print(f"warning: PowerShell shortcut install was blocked: {exc}")
+        print(f"fallback launcher created: {launcher_path}")
 
 
 def uninstall_windows_shortcuts(options: "InstallOptions") -> None:
-    _run_powershell(build_uninstall_shortcut_script(options))
+    try:
+        _run_powershell(build_uninstall_shortcut_script(options))
+    except PermissionError as exc:
+        remove_cmd_launcher(options)
+        unregister_windows_uninstall_entry()
+        print(f"warning: PowerShell shortcut uninstall was blocked: {exc}")

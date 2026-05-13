@@ -123,7 +123,7 @@ def test_spawn_launcher_detaches_on_macos(monkeypatch):
 
     watcher.spawn_launcher()
 
-    assert calls[0][0] == ["/usr/local/bin/python3", "-m", "codex_mate", "launch", "--no-history-sync"]
+    assert calls[0][0] == ["/usr/local/bin/python3", "-m", "codex_mate", "launch"]
     assert calls[0][1]["start_new_session"] is True
 
 
@@ -137,7 +137,7 @@ def test_spawn_launcher_windows_flags_are_cross_platform_safe(monkeypatch, tmp_p
 
     watcher.spawn_launcher()
 
-    assert calls[0][0] == [str(fake_python), "-m", "codex_mate", "launch", "--no-history-sync"]
+    assert calls[0][0] == [str(fake_python), "-m", "codex_mate", "launch"]
     assert "creationflags" in calls[0][1]
     assert calls[0][1]["env"]["PYINSTALLER_RESET_ENVIRONMENT"] == "1"
 
@@ -159,7 +159,6 @@ def test_spawn_launcher_passes_app_dir_to_launch_command(monkeypatch, tmp_path):
         "launch",
         "--app-dir",
         str(app_dir),
-        "--no-history-sync",
     ]
 
 

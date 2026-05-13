@@ -305,7 +305,6 @@ def spawn_launcher(app_dir: Path | None = None) -> subprocess.Popen | None:
     launch_args = ["launch"]
     if app_dir is not None:
         launch_args.extend(["--app-dir", str(app_dir)])
-    launch_args.append("--no-history-sync")
     args = runtime.command_args(*launch_args, prefer_pythonw=True)
     popen_kwargs = {
         "stdin": subprocess.DEVNULL,
