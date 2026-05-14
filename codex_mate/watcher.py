@@ -8,6 +8,7 @@ import time
 import traceback
 from datetime import datetime
 from pathlib import Path
+from shutil import which
 
 from codex_mate import history_sync, runtime
 from codex_mate.cdp import list_targets
@@ -302,7 +303,10 @@ def wait_for_takeover_grace(port: int, observed_pids: list[int], grace_seconds: 
 
 
 def spawn_launcher(app_dir: Path | None = None) -> subprocess.Popen | None:
-    launch_args = ["launch"]
+    # The watcher already runs sync_history_before_takeover() before spawning the
+    # launcher. Skipping the launch-time sync keeps takeover latency within the
+    # CDP/helper wait budget and avoids killing the relaunch before injection.
+    launch_args = ["launch", "--no-history-sync"]
     if app_dir is not None:
         launch_args.extend(["--app-dir", str(app_dir)])
     args = runtime.command_args(*launch_args, prefer_pythonw=True)
@@ -326,6 +330,16 @@ def spawn_launcher(app_dir: Path | None = None) -> subprocess.Popen | None:
     except Exception as exc:
         log(f"failed to spawn launcher: {exc}")
         return None
+
+
+def launcher_command_available() -> bool:
+    args = runtime.command_args("launch", prefer_pythonw=True)
+    executable = args[0]
+    resolved = which(executable) if not os.path.isabs(executable) else executable
+    if not resolved or not Path(resolved).exists():
+        log(f"launcher command unavailable: {executable}")
+        return False
+    return True
 
 
 def sync_history_before_takeover() -> None:
@@ -402,6 +416,10 @@ def takeover(debug_port: int, app_dir: Path | None = None) -> bool:
         if launch_app_dir is None:
             log("takeover: Codex app directory could not be determined from the running process; skipping takeover")
             return False
+
+    if not launcher_command_available():
+        log("takeover: launcher command is unavailable; skipping takeover")
+        return False
 
     # Step 3: Kill all Codex.exe and wait for them to disappear.
     log(f"takeover: killing {len(pids)} codex pid(s): {pids}")

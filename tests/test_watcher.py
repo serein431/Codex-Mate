@@ -128,7 +128,7 @@ def test_spawn_launcher_detaches_on_macos(monkeypatch):
 
     watcher.spawn_launcher()
 
-    assert calls[0][0] == ["/usr/local/bin/python3", "-m", "codex_mate", "launch"]
+    assert calls[0][0] == ["/usr/local/bin/python3", "-m", "codex_mate", "launch", "--no-history-sync"]
     assert calls[0][1]["start_new_session"] is True
 
 
@@ -142,7 +142,7 @@ def test_spawn_launcher_windows_flags_are_cross_platform_safe(monkeypatch, tmp_p
 
     watcher.spawn_launcher()
 
-    assert calls[0][0] == [str(fake_python), "-m", "codex_mate", "launch"]
+    assert calls[0][0] == [str(fake_python), "-m", "codex_mate", "launch", "--no-history-sync"]
     assert "creationflags" in calls[0][1]
     assert calls[0][1]["env"]["PYINSTALLER_RESET_ENVIRONMENT"] == "1"
 
@@ -162,6 +162,7 @@ def test_spawn_launcher_passes_app_dir_to_launch_command(monkeypatch, tmp_path):
         "-m",
         "codex_mate",
         "launch",
+        "--no-history-sync",
         "--app-dir",
         str(app_dir),
     ]
@@ -397,6 +398,19 @@ def test_takeover_skips_kill_when_windows_app_dir_is_unknown(monkeypatch):
     monkeypatch.setattr(watcher, "stop_launcher_processes", lambda: events.append(("stop-launchers", [])))
     monkeypatch.setattr(watcher, "find_codex_processes", lambda: [123])
     monkeypatch.setattr(watcher, "find_windows_codex_app_dir", lambda pids=None: None)
+    monkeypatch.setattr(watcher, "kill_processes", lambda pids, force=False: events.append(("kill", list(pids))))
+    monkeypatch.setattr(watcher, "spawn_launcher", lambda app_dir=None: events.append(("spawn", [app_dir])) or object())
+
+    assert watcher.takeover(debug_port=9229) is False
+    assert events == [("stop-launchers", [])]
+
+
+def test_takeover_skips_kill_when_launcher_command_is_unavailable(monkeypatch):
+    events = []
+    monkeypatch.setattr(watcher.sys, "platform", "darwin")
+    monkeypatch.setattr(watcher, "stop_launcher_processes", lambda: events.append(("stop-launchers", [])))
+    monkeypatch.setattr(watcher, "find_codex_processes", lambda: [123])
+    monkeypatch.setattr(watcher, "launcher_command_available", lambda: False)
     monkeypatch.setattr(watcher, "kill_processes", lambda pids, force=False: events.append(("kill", list(pids))))
     monkeypatch.setattr(watcher, "spawn_launcher", lambda app_dir=None: events.append(("spawn", [app_dir])) or object())
 
