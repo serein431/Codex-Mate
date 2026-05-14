@@ -93,6 +93,16 @@ def test_windows_watcher_autostart_installed_uses_run_key_or_startup_shortcut(mo
     assert autostart.windows_watcher_autostart_installed() is True
 
 
+def test_macos_watcher_autostart_installed_uses_launch_agent_path(monkeypatch, tmp_path):
+    monkeypatch.setattr(autostart.sys, "platform", "darwin")
+    monkeypatch.setattr(autostart.Path, "home", lambda: tmp_path)
+
+    assert autostart.macos_watcher_autostart_installed() is False
+    (tmp_path / "Library" / "LaunchAgents").mkdir(parents=True)
+    (tmp_path / "Library" / "LaunchAgents" / "dev.codexmate.watcher.plist").write_text("", encoding="utf-8")
+    assert autostart.macos_watcher_autostart_installed() is True
+
+
 def test_macos_watch_install_stops_legacy_watcher(monkeypatch, tmp_path):
     calls = []
     monkeypatch.setattr(autostart, "write_macos_launch_agent", lambda debug_port: tmp_path / "dev.codexmate.watcher.plist")
@@ -123,9 +133,10 @@ def test_cli_watch_remove_uses_autostart_module(monkeypatch):
 
     calls = []
     monkeypatch.setattr(cli.autostart, "uninstall_watcher_autostart", lambda: calls.append("remove"))
+    monkeypatch.setattr(cli.watcher, "disable_watcher", lambda: calls.append("disable"))
 
     assert cli.main(["watch-remove"]) == 0
-    assert calls == ["remove"]
+    assert calls == ["remove", "disable"]
 
 
 def test_windows_watcher_spawn_uses_project_root_and_log_files(monkeypatch, tmp_path):

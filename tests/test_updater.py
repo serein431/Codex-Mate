@@ -155,6 +155,7 @@ def test_perform_update_installs_downloaded_wheel_and_reruns_setup(monkeypatch, 
     wheel.write_bytes(b"wheel")
     monkeypatch.setattr(updater, "download_asset", lambda *args: wheel)
     monkeypatch.setattr(updater.autostart, "windows_watcher_autostart_installed", lambda: False)
+    monkeypatch.setattr(updater.autostart, "macos_watcher_autostart_installed", lambda: False)
     monkeypatch.setattr(updater.subprocess, "run", lambda command, **kwargs: commands.append((command, kwargs)))
 
     result = updater.perform_update(release, python_executable="python.exe", download_dir=tmp_path)
@@ -184,6 +185,7 @@ def test_perform_update_uses_console_python_when_started_by_pythonw(monkeypatch,
     monkeypatch.setattr(updater.sys, "platform", "win32")
     monkeypatch.setattr(updater, "download_asset", lambda *args: wheel)
     monkeypatch.setattr(updater.autostart, "windows_watcher_autostart_installed", lambda: False)
+    monkeypatch.setattr(updater.autostart, "macos_watcher_autostart_installed", lambda: False)
     monkeypatch.setattr(updater.subprocess, "run", lambda command, **kwargs: commands.append((command, kwargs)))
 
     updater.perform_update(release, python_executable=str(pythonw), download_dir=tmp_path)
@@ -212,6 +214,28 @@ def test_perform_update_restores_windows_watcher_when_it_was_enabled(monkeypatch
     updater.perform_update(release, python_executable="python.exe", download_dir=tmp_path)
 
     assert commands[-1] == (["python.exe", "-m", "codex_mate", "watch-install"], {"check": True, "cwd": updater.safe_setup_cwd()})
+
+
+def test_perform_update_restores_macos_watcher_when_it_was_enabled(monkeypatch, tmp_path):
+    commands = []
+    release = updater.Release(
+        version="v1.1.1",
+        url="https://github.com/serein431/Codex-Mate/releases/tag/v1.1.1",
+        body="fixes",
+        asset_name="pkg.whl",
+        asset_url="https://example.test/pkg.whl",
+    )
+    wheel = tmp_path / "pkg.whl"
+    wheel.write_bytes(b"wheel")
+    monkeypatch.setattr(updater.sys, "platform", "darwin")
+    monkeypatch.setattr(updater, "download_asset", lambda *args: wheel)
+    monkeypatch.setattr(updater.autostart, "windows_watcher_autostart_installed", lambda: False)
+    monkeypatch.setattr(updater.autostart, "macos_watcher_autostart_installed", lambda: True, raising=False)
+    monkeypatch.setattr(updater.subprocess, "run", lambda command, **kwargs: commands.append((command, kwargs)))
+
+    updater.perform_update(release, python_executable="/opt/python/bin/python3", download_dir=tmp_path)
+
+    assert commands[-1] == (["/opt/python/bin/python3", "-m", "codex_mate", "watch-install"], {"check": True, "cwd": updater.safe_setup_cwd()})
 
 
 def test_perform_update_rejects_release_without_asset(tmp_path):

@@ -21,6 +21,7 @@ class InstallOptions:
 def install_codex_mate(options: InstallOptions) -> None:
     if sys.platform == "darwin":
         install_macos_app(options)
+        watcher.enable_watcher()
         autostart.install_watcher_autostart(debug_port=9229)
         return
     if sys.platform == "win32":

@@ -201,6 +201,97 @@ def test_sync_history_preserves_existing_index_entries_with_session_file(tmp_pat
     assert [entry["id"] for entry in index_entries] == ["old-thread", "already-current", "file-only"]
 
 
+def test_merge_session_index_uses_updated_at_ms_and_avoids_rewriting_when_unchanged(tmp_path):
+    home = tmp_path / ".codex"
+    write_config(home)
+    conn = sqlite3.connect(home / "state_5.sqlite")
+    try:
+        conn.execute(
+            """
+            CREATE TABLE threads (
+                id TEXT PRIMARY KEY,
+                title TEXT,
+                updated_at INTEGER,
+                updated_at_ms INTEGER,
+                archived INTEGER DEFAULT 0,
+                model_provider TEXT,
+                model TEXT
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO threads (id, title, updated_at, updated_at_ms, archived, model_provider, model) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            ("thread-ms", "Fresh Title", 100, 1500, 0, "current_provider", "gpt-current"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    paths = history_sync.resolve_paths(home)
+    (home / "session_index.jsonl").write_text(
+        json.dumps({"id": "thread-ms", "thread_name": "Stale Title", "updated_at": "1970-01-01T00:00:00Z"}) + "\n",
+        encoding="utf-8",
+    )
+
+    first = history_sync.merge_session_index(paths)
+    content = (home / "session_index.jsonl").read_text(encoding="utf-8")
+    second = history_sync.merge_session_index(paths)
+
+    assert first["updated_session_index"] is True
+    assert json.loads(content)["thread_name"] == "Fresh Title"
+    assert json.loads(content)["updated_at"] == "1970-01-01T00:00:01Z"
+    assert second["updated_session_index"] is False
+    assert (home / "session_index.jsonl").read_text(encoding="utf-8") == content
+
+
+def test_merge_session_index_prefers_latest_rollout_timestamp(tmp_path):
+    home = tmp_path / ".codex"
+    write_config(home)
+    session_path = write_session_file(home, "thread-rollout", "current_provider", "gpt-current")
+    session_path.write_text(
+        json.dumps(
+            {
+                "type": "session_meta",
+                "timestamp": "2026-01-01T00:00:00.000Z",
+                "payload": {"id": "thread-rollout", "model_provider": "current_provider", "model": "gpt-current"},
+            }
+        )
+        + "\n"
+        + json.dumps({"type": "event_msg", "timestamp": "2026-01-01T00:05:42.987Z", "payload": {}})
+        + "\n",
+        encoding="utf-8",
+    )
+    conn = sqlite3.connect(home / "state_5.sqlite")
+    try:
+        conn.execute(
+            """
+            CREATE TABLE threads (
+                id TEXT PRIMARY KEY,
+                title TEXT,
+                rollout_path TEXT,
+                updated_at INTEGER,
+                updated_at_ms INTEGER,
+                archived INTEGER DEFAULT 0,
+                model_provider TEXT,
+                model TEXT
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO threads (id, title, rollout_path, updated_at, updated_at_ms, archived, model_provider, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("thread-rollout", "Rollout Time", str(session_path), 1767225600, 1767225600000, 0, "current_provider", "gpt-current"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    paths = history_sync.resolve_paths(home)
+
+    result = history_sync.merge_session_index(paths)
+
+    assert result["updated_session_index"] is True
+    entry = json.loads((home / "session_index.jsonl").read_text(encoding="utf-8"))
+    assert entry["updated_at"] == "2026-01-01T00:05:42Z"
+
+
 def test_sync_history_prunes_orphan_index_entries_without_database_or_session_file(tmp_path):
     home = tmp_path / ".codex"
     write_config(home)
@@ -261,6 +352,38 @@ def test_sync_history_skips_locked_session_files_without_aborting(tmp_path, monk
     assert payload["model_provider"] == "current_provider"
 
 
+def test_sync_history_updates_session_meta_timestamp_to_latest_event(tmp_path):
+    home = tmp_path / ".codex"
+    write_config(home)
+    create_current_threads_db(home)
+    session_path = write_session_file(home, "current-thread", "current_provider", "gpt-current")
+    session_path.write_text(
+        json.dumps(
+            {
+                "timestamp": "2026-01-01T00:00:00.000Z",
+                "type": "session_meta",
+                "payload": {
+                    "id": "current-thread",
+                    "timestamp": "2026-01-01T00:00:00.000Z",
+                    "model_provider": "current_provider",
+                    "model": "gpt-current",
+                },
+            }
+        )
+        + "\n"
+        + json.dumps({"timestamp": "2026-01-01T00:09:08.765Z", "type": "event_msg", "payload": {"type": "token_count"}})
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = history_sync.sync_history_if_ready(history_sync.resolve_paths(home))
+
+    assert result["updated_session_files"] == 1
+    first_line = json.loads(session_path.read_text(encoding="utf-8").splitlines()[0])
+    assert first_line["timestamp"] == "2026-01-01T00:09:08.765Z"
+    assert first_line["payload"]["timestamp"] == "2026-01-01T00:09:08.765Z"
+
+
 def test_sync_history_skips_when_codex_state_is_missing(tmp_path):
     paths = history_sync.resolve_paths(tmp_path / ".codex")
 
@@ -285,6 +408,29 @@ def test_sync_history_if_ready_skips_when_profile_already_matches(tmp_path):
     assert result["mismatched_model_threads"] == 0
     assert "backup_path" not in result
     assert not (home / "codex_mate_history_backups").exists()
+
+
+def test_sync_history_if_ready_repairs_stale_index_without_backup_when_profile_matches(tmp_path):
+    home = tmp_path / ".codex"
+    write_config(home)
+    create_current_threads_db(home)
+    (home / "session_index.jsonl").write_text(
+        json.dumps({"id": "current-thread", "thread_name": "Stale", "updated_at": "1970-01-01T00:00:00Z"}) + "\n",
+        encoding="utf-8",
+    )
+    paths = history_sync.resolve_paths(home)
+
+    result = history_sync.sync_history_if_ready(paths)
+
+    assert result["ok"] is True
+    assert result["skipped"] is True
+    assert result["sidecar_repaired"] is True
+    assert "backup_path" not in result
+    assert not (home / "codex_mate_history_backups").exists()
+    index_entries = [json.loads(line) for line in (home / "session_index.jsonl").read_text(encoding="utf-8").splitlines()]
+    assert [entry["id"] for entry in index_entries] == ["current-thread", "current-thread-2"]
+    assert index_entries[0]["thread_name"] == "Current Thread"
+    assert index_entries[0]["updated_at"] == "1970-01-01T00:01:40Z"
 
 
 def test_sync_history_if_ready_syncs_when_profile_mismatches(tmp_path):

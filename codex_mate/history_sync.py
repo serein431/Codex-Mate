@@ -209,11 +209,19 @@ def update_session_files(paths: HistoryPaths, profile: CurrentProfile) -> dict[s
         current_provider = str(payload.get("model_provider") or "")
         current_model = str(payload.get("model") or "") if payload.get("model") else None
         model_matches = profile.model is None or current_model == profile.model
-        if current_provider == profile.provider and model_matches:
+        latest_timestamp = latest_session_timestamp_ms(path)
+        latest_timestamp_text = iso_from_unix_ms_precise(latest_timestamp) if latest_timestamp is not None else None
+        timestamp_matches = latest_timestamp_text is None or (
+            item.get("timestamp") == latest_timestamp_text and payload.get("timestamp") == latest_timestamp_text
+        )
+        if current_provider == profile.provider and model_matches and timestamp_matches:
             continue
         payload["model_provider"] = profile.provider
         if profile.model:
             payload["model"] = profile.model
+        if latest_timestamp_text:
+            item["timestamp"] = latest_timestamp_text
+            payload["timestamp"] = latest_timestamp_text
         new_first = json.dumps(item, ensure_ascii=False, separators=(",", ":"))
         try:
             atomic_write_text(path, new_first + (ending + remainder if ending else "\n"))
@@ -228,6 +236,67 @@ def iso_from_unix(value: int | None) -> str:
     if not value:
         return datetime.fromtimestamp(0, tz=UTC).isoformat().replace("+00:00", "Z")
     return datetime.fromtimestamp(int(value), tz=UTC).isoformat().replace("+00:00", "Z")
+
+
+def iso_from_unix_ms(value: int | None) -> str:
+    if not value:
+        return iso_from_unix(None)
+    return datetime.fromtimestamp(int(value) / 1000, tz=UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def iso_from_unix_ms_precise(value: int) -> str:
+    return datetime.fromtimestamp(int(value) / 1000, tz=UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def parse_timestamp_ms(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, int | float):
+        number = float(value)
+        if number <= 0:
+            return None
+        return int(number if number > 10_000_000_000 else number * 1000)
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if text.replace(".", "", 1).isdigit():
+        return parse_timestamp_ms(float(text))
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return int(parsed.timestamp() * 1000)
+
+
+def item_timestamp_ms(item: object) -> int | None:
+    if not isinstance(item, dict):
+        return None
+    timestamp = parse_timestamp_ms(item.get("timestamp"))
+    if timestamp is not None:
+        return timestamp
+    payload = item.get("payload")
+    if isinstance(payload, dict):
+        return parse_timestamp_ms(payload.get("timestamp"))
+    return None
+
+
+def latest_session_timestamp_ms(path: Path) -> int | None:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    for line in reversed(lines):
+        try:
+            timestamp = item_timestamp_ms(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+        if timestamp is not None:
+            return timestamp
+    return None
 
 
 def read_session_index_entries(paths: HistoryPaths) -> list[dict[str, object]]:
@@ -273,22 +342,35 @@ def active_thread_index_entries(paths: HistoryPaths) -> list[dict[str, object]]:
         select_parts = ["id"]
         if "title" in columns:
             select_parts.append("title")
+        if "rollout_path" in columns:
+            select_parts.append("rollout_path")
         if "updated_at" in columns:
             select_parts.append("updated_at")
+        if "updated_at_ms" in columns:
+            select_parts.append("updated_at_ms")
         where_sql = "WHERE archived = 0" if "archived" in columns else ""
+        order_terms = []
+        if "updated_at_ms" in columns:
+            order_terms.append("updated_at_ms")
+        if "updated_at" in columns:
+            order_terms.append("updated_at * 1000")
+        order_sql = f"ORDER BY COALESCE({', '.join(order_terms)}, 0) ASC, id ASC" if order_terms else "ORDER BY id ASC"
         rows = conn.execute(
-            f"SELECT {', '.join(select_parts)} FROM threads {where_sql} ORDER BY updated_at ASC, id ASC"
+            f"SELECT {', '.join(select_parts)} FROM threads {where_sql} {order_sql}"
         ).fetchall()
 
     entries = []
     for row in rows:
         title = str(row["title"]) if "title" in row.keys() and row["title"] else str(row["id"])
-        updated_at = int(row["updated_at"]) if "updated_at" in row.keys() and row["updated_at"] else 0
+        updated_at_ms = int(row["updated_at_ms"]) if "updated_at_ms" in row.keys() and row["updated_at_ms"] else None
+        updated_at = int(row["updated_at"]) if "updated_at" in row.keys() and row["updated_at"] else None
+        rollout_updated_at_ms = latest_session_timestamp_ms(Path(str(row["rollout_path"]))) if "rollout_path" in row.keys() and row["rollout_path"] else None
+        index_updated_at_ms = rollout_updated_at_ms or updated_at_ms
         entries.append(
             {
                 "id": str(row["id"]),
                 "thread_name": title,
-                "updated_at": iso_from_unix(updated_at),
+                "updated_at": iso_from_unix_ms(index_updated_at_ms) if index_updated_at_ms is not None else iso_from_unix(updated_at),
             }
         )
     return entries
@@ -347,18 +429,34 @@ def merge_session_index(paths: HistoryPaths) -> dict[str, int]:
 
     if not merged and existing_entries:
         merged = existing_entries
+    updated_session_index = False
     if merged:
         content = "".join(json.dumps(entry, ensure_ascii=False, separators=(",", ":")) + "\n" for entry in merged)
+        existing_content = paths.session_index_path.read_text(encoding="utf-8") if paths.session_index_path.exists() else ""
+        if content == existing_content:
+            return {
+                "rewritten_index_entries": len(merged),
+                "database_index_entries": len(db_entries),
+                "preserved_index_entries": len(merged) - len(db_entries),
+                "updated_session_index": False,
+            }
         try:
             atomic_write_text(paths.session_index_path, content)
+            updated_session_index = True
         except OSError as exc:
             return {
                 "rewritten_index_entries": len(existing_entries),
                 "database_index_entries": len(db_entries),
                 "preserved_index_entries": len(existing_entries),
                 "skipped_session_index": str(exc),
+                "updated_session_index": False,
             }
-    return {"rewritten_index_entries": len(merged), "database_index_entries": len(db_entries), "preserved_index_entries": len(merged) - len(db_entries)}
+    return {
+        "rewritten_index_entries": len(merged),
+        "database_index_entries": len(db_entries),
+        "preserved_index_entries": len(merged) - len(db_entries),
+        "updated_session_index": updated_session_index,
+    }
 
 
 def load_global_state(path: Path) -> dict[str, object]:
@@ -487,8 +585,26 @@ def sync_history_if_ready(paths: HistoryPaths) -> dict[str, object]:
     mismatched_provider = int(current_status.get("mismatched_provider_threads") or 0)
     mismatched_model = int(current_status.get("mismatched_model_threads") or 0)
     if mismatched_provider == 0 and mismatched_model == 0:
+        sidecar_result: dict[str, object] = {}
+        if not current_status.get("skipped_database_status"):
+            profile = read_current_profile(paths)
+            session_result = update_session_files(paths, profile)
+            index_result = merge_session_index(paths)
+            global_state_result = sync_global_state(paths)
+            sidecar_repaired = (
+                bool(session_result.get("updated_session_files"))
+                or bool(index_result.get("updated_session_index"))
+                or bool(global_state_result.get("updated_global_state"))
+            )
+            sidecar_result = {
+                "sidecar_repaired": sidecar_repaired,
+                **session_result,
+                **index_result,
+                **global_state_result,
+            }
         return {
             **current_status,
+            **sidecar_result,
             "skipped": True,
             "reason": "history already matches current provider/model",
         }

@@ -9,7 +9,7 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 
-from codex_mate import runtime
+from codex_mate import history_sync, runtime
 from codex_mate.cdp import list_targets
 
 
@@ -328,6 +328,21 @@ def spawn_launcher(app_dir: Path | None = None) -> subprocess.Popen | None:
         return None
 
 
+def sync_history_before_takeover() -> None:
+    try:
+        result = history_sync.sync_history_if_ready(history_sync.resolve_paths())
+    except Exception as exc:
+        log(f"history sync before takeover failed: {exc}")
+        return
+    if result.get("skipped"):
+        return
+    changed = int(result.get("updated_database_rows", 0)) + int(result.get("updated_session_files", 0))
+    log(
+        "history synced before takeover "
+        f"(database rows={result.get('updated_database_rows')}, session files={result.get('updated_session_files')}, changed={changed})"
+    )
+
+
 def attach_to_running_codex(helper_port: int = DEFAULT_HELPER_PORT) -> bool:
     """Start the launcher/helper for a Codex process that already has CDP enabled."""
     stop_launcher_processes()
@@ -394,6 +409,8 @@ def takeover(debug_port: int, app_dir: Path | None = None) -> bool:
     if not wait_until_no_codex():
         log("takeover: codex processes did not exit in time, aborting this attempt")
         return False
+
+    sync_history_before_takeover()
 
     # Step 4: Give AppX activation machinery a moment to reset the "app is running" state.
     time.sleep(1.5)

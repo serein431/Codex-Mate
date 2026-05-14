@@ -142,6 +142,12 @@ if ($RunEnabled -or $ShortcutEnabled) {{ '1' }} else {{ '0' }}
     return _run_hidden_powershell(script).strip() == "1"
 
 
+def macos_watcher_autostart_installed() -> bool:
+    if sys.platform != "darwin":
+        return False
+    return macos_launch_agent_path().exists()
+
+
 def install_windows_watcher_autostart(debug_port: int) -> None:
     result = subprocess.run(
         ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", build_windows_watcher_install_script(debug_port)],

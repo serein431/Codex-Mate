@@ -10,6 +10,11 @@ import pytest
 from codex_mate import watcher
 
 
+@pytest.fixture(autouse=True)
+def isolate_watcher_data_root(tmp_path, monkeypatch):
+    monkeypatch.setattr(watcher, "data_root", lambda: tmp_path)
+
+
 def test_cdp_listening_returns_true_when_bound():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
         server.bind(("127.0.0.1", 0))
@@ -354,6 +359,36 @@ def test_takeover_passes_running_codex_app_dir_before_killing(monkeypatch):
 
     assert watcher.takeover(debug_port=9229) is True
     assert events == [("stop-launchers", []), ("kill", [123]), ("spawn", [app_dir])]
+
+
+def test_takeover_syncs_history_after_codex_exits_before_spawning_launcher(monkeypatch):
+    events = []
+
+    class Proc:
+        pid = 456
+
+        def poll(self):
+            return None
+
+    monkeypatch.setattr(watcher.sys, "platform", "darwin")
+    monkeypatch.setattr(watcher, "stop_launcher_processes", lambda: events.append(("stop-launchers", [])))
+    monkeypatch.setattr(watcher, "find_codex_processes", lambda: [123])
+    monkeypatch.setattr(watcher, "kill_processes", lambda pids, force=False: events.append(("kill", list(pids))))
+    monkeypatch.setattr(watcher, "wait_until_no_codex", lambda timeout=watcher.KILL_WAIT_TIMEOUT_SECONDS: events.append(("wait-exit", [])) or True)
+    monkeypatch.setattr(watcher, "sync_history_before_takeover", lambda: events.append(("sync-history", [])), raising=False)
+    monkeypatch.setattr(watcher, "spawn_launcher", lambda app_dir=None: events.append(("spawn", [app_dir])) or Proc())
+    monkeypatch.setattr(watcher, "wait_for_cdp", lambda port: True)
+    monkeypatch.setattr(watcher, "wait_for_helper", lambda port: True)
+    monkeypatch.setattr(watcher.time, "sleep", lambda seconds: None)
+
+    assert watcher.takeover(debug_port=9229) is True
+    assert events == [
+        ("stop-launchers", []),
+        ("kill", [123]),
+        ("wait-exit", []),
+        ("sync-history", []),
+        ("spawn", [None]),
+    ]
 
 
 def test_takeover_skips_kill_when_windows_app_dir_is_unknown(monkeypatch):
