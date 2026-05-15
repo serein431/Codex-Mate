@@ -18,6 +18,9 @@ def test_build_install_shortcut_script_contains_codex_mate_shortcuts(tmp_path):
 
     assert "Codex Mate.lnk" in script
     assert "codex-mate.ico" in script
+    assert "Copy-Item -Path $SourceIcon -Destination $CodexMateIcon -Force" in script
+    assert "Join-Path $env:LOCALAPPDATA 'CodexMate'" in script
+    assert "Join-Path $env:USERPROFILE '.codex-mate'" in script
     assert "-m codex_mate launch" in script
     assert "--no-history-sync" not in script
     assert "CreateShortcut" in script
@@ -32,7 +35,7 @@ def test_build_install_shortcut_script_contains_codex_mate_shortcuts(tmp_path):
     assert "Codex.exe" not in script
     assert "IconLocation = $CodexMateIcon" in script
     assert "$Python,0" not in script
-    assert str(Path.cwd()) in script
+    assert str(windows_installer.command_root()) in script
     assert "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\CodexMate" in script
     assert LEGACY_BRAND not in script
     assert LEGACY_OWNER not in script
@@ -40,7 +43,7 @@ def test_build_install_shortcut_script_contains_codex_mate_shortcuts(tmp_path):
     assert "DisplayName" in script
     assert "DisplayIcon" in script
     assert "UninstallString" in script
-    assert "$UninstallCommand = 'cmd.exe /c cd /d \"' + $ProjectRoot + '\" && \"' + $Python + '\" -m codex_mate uninstall" in script
+    assert "$UninstallCommand = 'cmd.exe /c pushd \"' + $ProjectRoot + '\" && \"' + $Python + '\" -m codex_mate uninstall" in script
     assert "--install-root" in script
     assert "QuietUninstallString" in script
     assert f"DisplayVersion -Value '{__version__}'" in script
@@ -69,8 +72,60 @@ def test_install_windows_shortcuts_falls_back_to_cmd_launcher_when_powershell_is
     launcher = tmp_path / "Codex Mate.cmd"
     assert launcher.exists()
     text = launcher.read_text(encoding="utf-8")
-    assert 'cd /d "' in text
+    assert 'pushd "' in text
     assert 'start "" "C:\\Tools\\CodexMate.exe" launch' in text
+    assert "popd" in text
+
+
+def test_register_windows_uninstall_entry_uses_local_icon(tmp_path, monkeypatch):
+    values = {}
+
+    class Key:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+    class Winreg:
+        HKEY_CURRENT_USER = object()
+        REG_SZ = object()
+
+        @staticmethod
+        def CreateKey(_root, _path):
+            return Key()
+
+        @staticmethod
+        def SetValueEx(_key, name, _reserved, _kind, value):
+            values[name] = value
+
+    icon = tmp_path / "codex-mate.ico"
+    icon.write_bytes(b"icon")
+    monkeypatch.setitem(__import__("sys").modules, "winreg", Winreg)
+    monkeypatch.setattr(windows_installer, "ensure_local_icon", lambda: icon)
+    monkeypatch.setattr(windows_installer, "command_root", lambda: tmp_path / "project")
+
+    windows_installer.register_windows_uninstall_entry(
+        InstallOptions(install_root=tmp_path, launcher_command='"C:\\Tools\\CodexMate.exe" launch'),
+        tmp_path / "Codex Mate.cmd",
+    )
+
+    assert values["DisplayIcon"] == str(icon)
+    assert " uninstall " in values["UninstallString"]
+
+
+def test_fallback_uninstall_command_runs_uninstall_instead_of_launch(tmp_path, monkeypatch):
+    monkeypatch.setattr(windows_installer, "command_root", lambda: tmp_path / "project")
+
+    command = windows_installer._uninstall_command(
+        InstallOptions(install_root=tmp_path, launcher_command='"C:\\Tools\\CodexMate.exe" launch')
+    )
+
+    assert "CodexMate.exe" in command
+    assert " uninstall " in command
+    assert " launch " not in command
+    assert "--install-root" in command
+    assert str(tmp_path) in command
 
 
 def test_uninstall_windows_shortcuts_removes_cmd_fallback_when_powershell_is_blocked(tmp_path, monkeypatch):

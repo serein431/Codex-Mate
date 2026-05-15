@@ -175,6 +175,37 @@ def test_parse_windows_codex_process_details_extracts_pid_and_app_dir():
     assert watcher.windows_codex_app_dir_from_details([(123, Path("C:/Users/me/AppData/Local/Codex/app/Codex.exe"))], [123]) == Path("C:/Users/me/AppData/Local/Codex/app")
 
 
+def test_find_windows_codex_process_details_prefers_fast_get_process(monkeypatch):
+    scripts = []
+
+    def run(script, timeout=8.0):
+        scripts.append((script, timeout))
+        return "123\tC:/Codex/app/Codex.exe\n"
+
+    monkeypatch.setattr(watcher, "_run_powershell", run)
+
+    assert watcher.find_windows_codex_process_details() == [(123, Path("C:/Codex/app/Codex.exe"))]
+    assert "Get-Process" in scripts[0][0]
+    assert scripts[0][1] == 3.0
+    assert len(scripts) == 1
+
+
+def test_find_windows_codex_process_details_falls_back_to_cim(monkeypatch):
+    scripts = []
+
+    def run(script, timeout=8.0):
+        scripts.append(script)
+        if "Get-Process" in script:
+            return ""
+        return "456\tC:/Codex/app/Codex.exe\n"
+
+    monkeypatch.setattr(watcher, "_run_powershell", run)
+
+    assert watcher.find_windows_codex_process_details() == [(456, Path("C:/Codex/app/Codex.exe"))]
+    assert "Get-Process" in scripts[0]
+    assert "Get-CimInstance" in scripts[1]
+
+
 def test_stop_launcher_processes_cleans_legacy_macos_module(monkeypatch):
     calls = []
     monkeypatch.setattr(watcher.sys, "platform", "darwin")

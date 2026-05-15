@@ -17,8 +17,15 @@ BridgeHandler = Callable[[str, dict[str, object]], dict[str, object]]
 BRIDGE_BINDING_NAME = "codexMateV2"
 
 
+def _loopback_session() -> requests.Session:
+    session = requests.Session()
+    session.trust_env = False
+    return session
+
+
 def list_targets(port: int) -> list[dict[str, object]]:
-    response = requests.get(f"http://127.0.0.1:{port}/json", timeout=3)
+    with _loopback_session() as session:
+        response = session.get(f"http://127.0.0.1:{port}/json", timeout=3)
     response.raise_for_status()
     return response.json()
 

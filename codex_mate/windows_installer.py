@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -50,6 +51,24 @@ def _icon_path_expr() -> str:
     return _ps_quote(str(Path(__file__).resolve().parent / "assets" / "codex-mate.ico"))
 
 
+def local_icon_path() -> Path:
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    root = Path(local_app_data) / "CodexMate" if local_app_data else Path.home() / ".codex-mate"
+    return root / "codex-mate.ico"
+
+
+def ensure_local_icon() -> Path:
+    source = Path(__file__).resolve().parent / "assets" / "codex-mate.ico"
+    target = local_icon_path()
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not target.exists() or source.stat().st_mtime > target.stat().st_mtime:
+            target.write_bytes(source.read_bytes())
+    except OSError:
+        return source
+    return target
+
+
 def _split_launcher_command(command: str) -> tuple[str, str]:
     command = command.strip()
     if command.startswith('"'):
@@ -80,7 +99,13 @@ def _uninstall_arguments(arguments: str) -> str:
 def _uninstall_command_expr(target: str, arguments: str) -> str:
     target_expr = "$Python" if target == "python" else _ps_quote(target)
     uninstall_arguments = _uninstall_arguments(arguments)
-    return f"'cmd.exe /c cd /d \"' + $ProjectRoot + '\" && \"' + {target_expr} + '\" {uninstall_arguments} \"' + $InstallRoot + '\"'"
+    return f"'cmd.exe /c pushd \"' + $ProjectRoot + '\" && \"' + {target_expr} + '\" {uninstall_arguments} \"' + $InstallRoot + '\" & popd'"
+
+
+def _uninstall_command(options: "InstallOptions") -> str:
+    target, arguments = _split_launcher_command(_launcher_command(options))
+    command = f'pushd "{command_root()}" && "{target}" {_uninstall_arguments(arguments)} "{install_root_path(options)}" & popd'
+    return subprocess.list2cmdline(["cmd.exe", "/c", command])
 
 
 def cmd_launcher_path(options: "InstallOptions") -> Path:
@@ -97,8 +122,9 @@ def write_cmd_launcher(options: "InstallOptions") -> Path:
         "\n".join(
             [
                 "@echo off",
-                f'cd /d "{project_root}"',
+                f'pushd "{project_root}"',
                 f'start "" "{target}" {arguments}'.rstrip(),
+                "popd",
                 "",
             ]
         ),
@@ -126,10 +152,10 @@ def register_windows_uninstall_entry(options: "InstallOptions", launcher_path: P
             winreg.SetValueEx(key, "DisplayVersion", 0, winreg.REG_SZ, __version__)
             winreg.SetValueEx(key, "Publisher", 0, winreg.REG_SZ, "codex-mate")
             winreg.SetValueEx(key, "InstallLocation", 0, winreg.REG_SZ, str(command_root()))
-            command = subprocess.list2cmdline([str(launcher_path)])
-            winreg.SetValueEx(key, "DisplayIcon", 0, winreg.REG_SZ, str(_icon_path_expr()).strip("'"))
-            winreg.SetValueEx(key, "UninstallString", 0, winreg.REG_SZ, command)
-            winreg.SetValueEx(key, "QuietUninstallString", 0, winreg.REG_SZ, command)
+            winreg.SetValueEx(key, "DisplayIcon", 0, winreg.REG_SZ, str(ensure_local_icon()))
+            uninstall_command = _uninstall_command(options)
+            winreg.SetValueEx(key, "UninstallString", 0, winreg.REG_SZ, uninstall_command)
+            winreg.SetValueEx(key, "QuietUninstallString", 0, winreg.REG_SZ, uninstall_command)
     except OSError as exc:
         print(f"warning: unable to register uninstall entry: {exc}")
 
@@ -154,7 +180,7 @@ def unregister_windows_uninstall_entry() -> None:
 def build_install_shortcut_script(options: "InstallOptions") -> str:
     root = _install_root_expr(options)
     project_root = _project_root_expr()
-    icon_path = _icon_path_expr()
+    source_icon_path = _icon_path_expr()
     target, arguments = _split_launcher_command(_launcher_command(options))
     target_expr = "$Pythonw" if target == "python" else _ps_quote(target)
     arguments_expr = _ps_quote(arguments)
@@ -162,8 +188,12 @@ def build_install_shortcut_script(options: "InstallOptions") -> str:
     return f"""
 $InstallRoot = {root}
 $ProjectRoot = {project_root}
-$CodexMateIcon = {icon_path}
+$SourceIcon = {source_icon_path}
+$DataRoot = if ($env:LOCALAPPDATA) {{ Join-Path $env:LOCALAPPDATA 'CodexMate' }} else {{ Join-Path $env:USERPROFILE '.codex-mate' }}
+$CodexMateIcon = Join-Path $DataRoot 'codex-mate.ico'
 New-Item -ItemType Directory -Force -Path $InstallRoot | Out-Null
+New-Item -ItemType Directory -Force -Path $DataRoot | Out-Null
+if (Test-Path $SourceIcon) {{ Copy-Item -Path $SourceIcon -Destination $CodexMateIcon -Force }}
 $ShortcutPath = Join-Path $InstallRoot 'Codex Mate.lnk'
 $Python = (Get-Command python).Source
 $PythonwCandidate = Join-Path (Split-Path $Python -Parent) 'pythonw.exe'

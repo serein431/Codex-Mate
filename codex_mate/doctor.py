@@ -38,6 +38,6 @@ def collect_status() -> dict[str, Any]:
         "codex_app": {
             "cache_path": str(cache_path),
             "cache_exists": cache_path.exists(),
-            "resolved_dir": str(resolved) if resolved else "",
+            "resolved_dir": resolved.as_posix() if resolved else "",
         },
     }

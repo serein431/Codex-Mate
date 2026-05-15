@@ -150,11 +150,18 @@ def parse_windows_codex_process_details(output: str) -> list[tuple[int, Path]]:
 
 
 def find_windows_codex_process_details() -> list[tuple[int, Path]]:
-    script = (
+    fast_script = (
+        "Get-Process -Name Codex,codex -ErrorAction SilentlyContinue "
+        '| ForEach-Object { [string]$_.Id + "`t" + [string]$_.Path }'
+    )
+    details = parse_windows_codex_process_details(_run_powershell(fast_script, timeout=3.0))
+    if details:
+        return details
+    fallback_script = (
         "Get-CimInstance Win32_Process -Filter \"Name='Codex.exe' OR Name='codex.exe'\" "
         "| ForEach-Object { [string]$_.ProcessId + \"`t\" + [string]$_.ExecutablePath }"
     )
-    return parse_windows_codex_process_details(_run_powershell(script))
+    return parse_windows_codex_process_details(_run_powershell(fallback_script))
 
 
 def windows_codex_app_dir_from_details(details: list[tuple[int, Path]], pids: list[int] | None = None) -> Path | None:

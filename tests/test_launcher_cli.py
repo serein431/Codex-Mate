@@ -331,6 +331,10 @@ def test_launch_uses_packaged_activation_for_windowsapps(monkeypatch):
     assert launched == []
 
 
+def test_windows_packaged_activation_uses_local_server_context():
+    assert launcher.CLSCTX_LOCAL_SERVER == 0x4
+
+
 def test_windows_port_selector_uses_ephemeral_port_when_default_is_busy(monkeypatch):
     monkeypatch.setattr(launcher.sys, "platform", "win32")
     monkeypatch.setattr(launcher, "_can_bind_loopback_port", lambda port: port != 9229)

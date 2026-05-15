@@ -241,6 +241,9 @@ class _GUID(ctypes.Structure):
         super().__init__(parsed.time_low, parsed.time_mid, parsed.time_hi_version, (ctypes.c_ubyte * 8)(*data4))
 
 
+CLSCTX_LOCAL_SERVER = 0x4
+
+
 def _raise_for_hresult(hr: int, operation: str) -> None:
     if hr < 0:
         raise OSError(f"{operation} failed with HRESULT 0x{hr & 0xFFFFFFFF:08X}")
@@ -274,7 +277,7 @@ def activate_packaged_app(app_user_model_id: str, arguments: str) -> int:
         clsid = _GUID("45BA127D-10A8-46EA-8AB7-56EA9078943C")
         iid = _GUID("2e941141-7f97-4756-ba1d-9decde894a3d")
         _raise_for_hresult(
-            ole32.CoCreateInstance(ctypes.byref(clsid), None, 1, ctypes.byref(iid), ctypes.byref(activation_manager)),
+            ole32.CoCreateInstance(ctypes.byref(clsid), None, CLSCTX_LOCAL_SERVER, ctypes.byref(iid), ctypes.byref(activation_manager)),
             "CoCreateInstance(ApplicationActivationManager)",
         )
 

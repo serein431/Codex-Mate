@@ -198,7 +198,7 @@ def build_macos_launch_agent_plist(python_executable: Path, debug_port: int, wor
     out_log = data_root() / "watcher.launchd.log"
     err_log = data_root() / "watcher.launchd.err"
     program_arguments = runtime.command_args("watch", "--debug-port", str(debug_port))
-    program_arguments[0] = str(python_executable)
+    program_arguments[0] = python_executable.as_posix()
     return {
         "Label": MACOS_LAUNCH_AGENT_LABEL,
         "ProgramArguments": program_arguments,

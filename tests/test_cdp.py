@@ -68,6 +68,14 @@ def test_bridge_binding_name_is_versioned_for_reinjection():
     assert BRIDGE_BINDING_NAME == "codexMateV2"
 
 
+def test_loopback_session_ignores_environment_proxies():
+    session = cdp._loopback_session()
+    try:
+        assert session.trust_env is False
+    finally:
+        session.close()
+
+
 def test_make_bridge_binding_name_is_unique_for_reinjection():
     first = make_bridge_binding_name()
     second = make_bridge_binding_name()

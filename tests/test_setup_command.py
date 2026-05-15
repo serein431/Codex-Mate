@@ -1,4 +1,7 @@
+import os
 from pathlib import Path
+
+import pytest
 
 
 def test_setup_command_offers_install_and_uninstall_choices():
@@ -20,6 +23,8 @@ def test_setup_command_offers_install_and_uninstall_choices():
 
 
 def test_setup_command_is_executable():
+    if os.name == "nt":
+        pytest.skip("POSIX executable bits are not meaningful on Windows")
     mode = Path("setup.command").stat().st_mode
 
     assert mode & 0o111
