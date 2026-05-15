@@ -2,12 +2,15 @@
   const helperBase = window.__CODEX_MATE_HELPER__ || "http://127.0.0.1:57321";
   const buttonClass = "codex-delete-button";
   const styleId = "codex-delete-style";
-  const codexDeleteStyleVersion = "6";
+  const codexDeleteStyleVersion = "9";
   const codexMateMenuId = "codex-mate-menu";
   const codexDeleteVersion = "5";
   const codexArchiveDeleteAllVersion = "2";
   const codexMateVersion = window.__CODEX_MATE_VERSION__ || "dev";
   const codexMateSettingsKey = "codexMateSettings";
+  const codexMateMenuVersion = "16";
+  const codexMateTriggerInstalled = "16";
+  const codexMateFileButtonVersion = "16";
 
   function closestElement(target, selector) {
     const element = target?.nodeType === 1 ? target : target?.parentElement;
@@ -134,8 +137,8 @@
       }
       #${codexMateMenuId}.codex-mate-menu-floating {
         position: fixed;
-        top: 0;
-        right: 140px;
+        top: 8px;
+        right: 196px;
         left: auto;
         z-index: 2147483645;
         height: 30px;
@@ -148,21 +151,59 @@
       #${codexMateMenuId} {
         display: inline-flex;
         align-items: center;
+        gap: 2px;
         height: 100%;
         flex: 0 0 auto;
         pointer-events: auto;
+        position: relative;
+        z-index: 2147483645;
+        isolation: isolate;
         -webkit-app-region: no-drag;
       }
-      .codex-mate-trigger {
-        border: 0;
+      .codex-mate-toolbar-button {
+        border: 1px solid transparent;
         background: transparent;
         color: inherit;
         font: inherit;
-        height: 100%;
-        padding: 0 8px;
+        width: 28px;
+        min-width: 28px;
+        height: 28px;
+        padding: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 8px;
+        letter-spacing: 0;
+        box-shadow: none;
         cursor: pointer;
         pointer-events: auto;
+        position: relative;
+        z-index: 1;
         -webkit-app-region: no-drag;
+      }
+      .codex-mate-toolbar-button:hover,
+      .codex-mate-toolbar-button:focus-visible {
+        background: rgba(127, 127, 127, .12);
+        border-color: rgba(127, 127, 127, .2);
+      }
+      .codex-mate-toolbar-button:focus-visible {
+        outline: none;
+      }
+      .codex-mate-trigger {
+        font-size: 11px;
+        font-weight: 650;
+        line-height: 1;
+      }
+      .codex-mate-trigger[data-codex-mate-compact="true"] {
+        letter-spacing: 0;
+      }
+      .codex-mate-file-button {
+        flex: 0 0 auto;
+      }
+      .codex-mate-file-button svg {
+        width: 17px;
+        height: 17px;
+        flex: 0 0 auto;
       }
       .codex-mate-modal-overlay {
         position: fixed;
@@ -426,10 +467,24 @@
   function findNativeMenuInsertionPoint() {
     if (!codexMateSettings().nativeMenuPlacement) return null;
     const header = document.querySelector(".app-header-tint");
-    const menuBar = header?.querySelector(".flex.items-center.gap-0\\.5") || header?.querySelector('[class*="flex items-center gap-0.5"]');
+    const directGroup = header?.querySelector(".ms-auto.flex.shrink-0.items-center.gap-1\\.5");
+    if (directGroup?.querySelectorAll("button").length >= 2) {
+      const buttons = Array.from(directGroup.querySelectorAll("button")).filter((button) => !button.closest(`#${codexMateMenuId}`));
+      return { parent: directGroup, before: buttons[0] || null, nativeButtonClass: buttons[buttons.length - 1]?.className || "" };
+    }
+    const rightGroups = Array.from(header?.querySelectorAll("div") || []).filter((group) => {
+      const className = group.className?.toString() || "";
+      if (!/\bms-auto\b/.test(className) || !/\bflex\b/.test(className) || !/\bitems-center\b/.test(className)) return false;
+      const rect = group.getBoundingClientRect?.();
+      if (!rect || rect.width <= 0 || rect.height <= 0 || rect.top < 4 || rect.top > 18 || rect.left < window.innerWidth * 0.55 || rect.right > window.innerWidth - 24) return false;
+      const style = window.getComputedStyle?.(group);
+      if (style?.visibility === "hidden" || style?.display === "none") return false;
+      return group.querySelectorAll("button").length >= 2;
+    });
+    const menuBar = rightGroups.sort((left, right) => right.getBoundingClientRect().left - left.getBoundingClientRect().left)[0];
     if (!menuBar) return null;
     const buttons = Array.from(menuBar.querySelectorAll("button")).filter((button) => !button.closest(`#${codexMateMenuId}`));
-    return { parent: menuBar, before: buttons[buttons.length - 1]?.nextSibling || null, nativeButtonClass: buttons[buttons.length - 1]?.className || "" };
+    return { parent: menuBar, before: buttons[0] || null, nativeButtonClass: buttons[buttons.length - 1]?.className || "" };
   }
 
   function removeDuplicateCodexMateMenus(keep) {
@@ -441,7 +496,7 @@
     });
     Array.from(document.querySelectorAll("button")).forEach((button) => {
       const label = (button.textContent || "").trim();
-      if ((label === `Codex Mate ${codexMateVersion}` || label.startsWith(legacyMenuName)) && !button.closest(`#${codexMateMenuId}`)) {
+      if ((label.startsWith("Codex Mate") || label.startsWith(legacyMenuName)) && !button.closest(`#${codexMateMenuId}`)) {
         button.remove();
       }
     });
@@ -449,13 +504,323 @@
 
   function configureCodexMateTrigger(menu, trigger, nativeButtonClass) {
     if (!trigger) return;
-    if (nativeButtonClass) trigger.className = nativeButtonClass;
-    if (trigger.dataset.codexMateTriggerInstalled === "5") return;
-    trigger.dataset.codexMateTriggerInstalled = "5";
+    trigger.className = "codex-mate-toolbar-button codex-mate-trigger";
+    trigger.textContent = "CM";
+    trigger.dataset.codexMateCompact = "true";
+    trigger.setAttribute("aria-label", `Codex Mate ${codexMateVersion}`);
+    trigger.setAttribute("title", `Codex Mate ${codexMateVersion}`);
+    if (trigger.dataset.codexMateTriggerInstalled === codexMateTriggerInstalled) return;
+    trigger.dataset.codexMateTriggerInstalled = codexMateTriggerInstalled;
+    ["pointerdown", "mousedown", "mouseup", "touchstart"].forEach((eventName) => {
+      trigger.addEventListener(eventName, (event) => {
+        event.stopPropagation();
+        event.stopImmediatePropagation?.();
+      }, true);
+    });
     trigger.addEventListener("click", (event) => {
       event.preventDefault();
       event.stopPropagation();
+      event.stopImmediatePropagation?.();
       openCodexMateModal();
+    }, true);
+  }
+
+  function nativeFilePanelVisible() {
+    return Array.from(document.querySelectorAll("input, [role='searchbox']")).some((element) => {
+      const label = [
+        element.getAttribute("placeholder"),
+        element.getAttribute("aria-label"),
+        element.textContent,
+      ].filter(Boolean).join(" ");
+      return /筛选文件|Filter files/i.test(label) && !isInsideReviewPanel(element);
+    });
+  }
+
+  function isInsideReviewPanel(element) {
+    const panel = element?.closest?.("[role='tabpanel']");
+    const label = [
+      panel?.getAttribute?.("aria-label"),
+      panel?.textContent,
+    ].filter(Boolean).join(" ");
+    return /审查|Review/i.test(label) || !!element?.closest?.(".codex-review-diff-card");
+  }
+
+  function visibleButtonCandidates() {
+    return Array.from(document.querySelectorAll("button, [role='button']")).filter((button) => {
+      if (button.closest(`#${codexMateMenuId}`)) return false;
+      if (button.disabled || button.getAttribute("aria-disabled") === "true") return false;
+      const rect = button.getBoundingClientRect?.();
+      if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+      if (rect.bottom < 0 || rect.top > window.innerHeight || rect.right < 0 || rect.left > window.innerWidth) return false;
+      const style = window.getComputedStyle?.(button);
+      return style?.visibility !== "hidden" && style?.display !== "none";
+    });
+  }
+
+  function buttonAccessibleText(button) {
+    return [
+      button.getAttribute("aria-label"),
+      button.getAttribute("title"),
+      button.getAttribute("data-testid"),
+      button.textContent,
+    ].filter(Boolean).join(" ");
+  }
+
+  function likelyTopRightToolbarButton(button) {
+    const rect = button.getBoundingClientRect?.();
+    if (!rect) return false;
+    return rect.top >= 40
+      && rect.top < 190
+      && rect.left > Math.max(window.innerWidth * 0.62, window.innerWidth - 260);
+  }
+
+  function isUnsafeNativeFilePanelButton(button) {
+    const label = buttonAccessibleText(button).trim();
+    if (isInsideReviewPanel(button)) return true;
+    if (/在编辑器中打开|Open in editor|Cursor|VS Code|打开文件|Open file/i.test(label)) return true;
+    if (/^(打开|Open)$/i.test(label)) return true;
+    const rect = button.getBoundingClientRect?.();
+    return !!rect && rect.top < 40;
+  }
+
+  function looksLikeFolderButton(button) {
+    const svgText = Array.from(button.querySelectorAll("path"))
+      .map((path) => path.getAttribute("d") || "")
+      .join(" ");
+    return /M6\.584|H3\.38184V12\.7002|folder/i.test(svgText + " " + button.innerHTML);
+  }
+
+  function looksLikeNativeFileTreeToolbarButton(button) {
+    const rect = button.getBoundingClientRect?.();
+    if (!rect) return false;
+    return rect.top >= 40
+      && rect.top <= 100
+      && rect.left > Math.max(window.innerWidth * 0.72, window.innerWidth - 120)
+      && /\bms-auto\b/.test(button.className?.toString() || "");
+  }
+
+  function findNativeFilePanelButton() {
+    const labelPattern = /文件列表|文件面板|项目文件|Files|File list|Show files|Browse files/i;
+    const candidates = visibleButtonCandidates()
+      .filter(likelyTopRightToolbarButton)
+      .filter((button) => !isUnsafeNativeFilePanelButton(button));
+    const toolbarCandidates = candidates.filter(looksLikeNativeFileTreeToolbarButton);
+    return candidates.find((button) => labelPattern.test(buttonAccessibleText(button)))
+      || toolbarCandidates.find(looksLikeFolderButton)
+      || toolbarCandidates[0]
+      || null;
+  }
+
+  function findNativeReviewFileButton() {
+    const labelPattern = /在审查中显示文件|审查中显示文件|Show file in review|Show in review/i;
+    return visibleButtonCandidates()
+      .filter((button) => labelPattern.test(buttonAccessibleText(button)))
+      .sort((left, right) => Math.abs(left.getBoundingClientRect().top - 96) - Math.abs(right.getBoundingClientRect().top - 96))[0]
+      || null;
+  }
+
+  function delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  async function waitForElement(predicate, timeoutMs = 2200, intervalMs = 80) {
+    const deadline = Date.now() + timeoutMs;
+    let found = predicate();
+    while (!found && Date.now() < deadline) {
+      await delay(intervalMs);
+      found = predicate();
+    }
+    return found || null;
+  }
+
+  function visibleElements(selector) {
+    return Array.from(document.querySelectorAll(selector)).filter((element) => {
+      const rect = element.getBoundingClientRect?.();
+      if (!rect || rect.width <= 0 || rect.height <= 0) return false;
+      if (rect.bottom < 0 || rect.top > window.innerHeight || rect.right < 0 || rect.left > window.innerWidth) return false;
+      const style = window.getComputedStyle?.(element);
+      return style?.visibility !== "hidden" && style?.display !== "none";
+    });
+  }
+
+  function nativeFileSearchInput() {
+    return visibleElements("input, [role='textbox']").find((element) => {
+      const label = [
+        element.getAttribute("placeholder"),
+        element.getAttribute("aria-label"),
+        element.textContent,
+      ].filter(Boolean).join(" ");
+      return /搜索文件|Search files/i.test(label);
+    }) || null;
+  }
+
+  function firstNativeFileSearchResult() {
+    return visibleElements("[role='option'], [cmdk-item], [data-value]").find((element) => {
+      const value = element.getAttribute("data-value") || element.getAttribute("value") || "";
+      const text = element.textContent || "";
+      return !/^文件$|^Files$/i.test(value) && /(^|[\s/])\.gitignore\b|\.(md|py|toml|json|txt|js|ts|tsx|jsx|yml|yaml|bat|command)\b/i.test(`${value} ${text}`);
+    }) || null;
+  }
+
+  function setNativeInputValue(input, value) {
+    input.focus?.();
+    input.select?.();
+    const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), "value")?.set
+      || Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+    setter?.call(input, value) ?? (input.value = value);
+    input._valueTracker?.setValue?.("");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  }
+
+  function activateNativeFileSearchResult(result, input) {
+    result.focus?.();
+    result.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "mouse" }));
+    result.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+    result.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerType: "mouse" }));
+    result.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
+    result.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+    input?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true, cancelable: true }));
+    input?.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", code: "Enter", bubbles: true, cancelable: true }));
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true, cancelable: true }));
+  }
+
+  async function openNativeWorkspaceFileTab() {
+    const searchTerms = ["pyproject", "AGENTS", "README", "package", ".gitignore", "md", "."];
+    for (const term of searchTerms) {
+      window.postMessage({ type: "file-search-command-menu" }, "*");
+      const input = await waitForElement(nativeFileSearchInput, 1200);
+      if (!input) continue;
+      setNativeInputValue(input, term);
+      const result = await waitForElement(firstNativeFileSearchResult, 2200);
+      if (!result) {
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true, cancelable: true }));
+        continue;
+      }
+      activateNativeFileSearchResult(result, input);
+      if (await waitForElement(nativeFilePanelVisible, 1800)) return true;
+      if (await waitForElement(findNativeFilePanelButton, 2200)) return true;
+    }
+    return false;
+  }
+
+  async function openNativeFilePanel() {
+    if (nativeFilePanelVisible()) return true;
+    const button = findNativeFilePanelButton();
+    if (button) {
+      button.click();
+      return !!(await waitForElement(nativeFilePanelVisible, 1200));
+    }
+    const openedFile = await openNativeWorkspaceFileTab();
+    if (!openedFile) {
+      showToast("没有找到可打开的原生文件入口", null);
+      return false;
+    }
+    if (await waitForElement(nativeFilePanelVisible, 500)) return true;
+    const nativeButton = await waitForElement(findNativeFilePanelButton, 1600);
+    if (!nativeButton) {
+      showToast("已打开原生文件页，但未找到文件树按钮", null);
+      return false;
+    }
+    nativeButton.click();
+    if (await waitForElement(nativeFilePanelVisible, 1200)) return true;
+    showToast("原生文件树没有响应", null);
+    return false;
+  }
+
+  function visibleRightPanelLeft() {
+    const panels = visibleElements("[role='tabpanel'], .absolute.top-0.bottom-0.left-0").filter((panel) => {
+      const rect = panel.getBoundingClientRect?.();
+      return rect
+        && rect.left > window.innerWidth * 0.35
+        && rect.top <= 90
+        && rect.height > 160
+        && rect.width > 180;
+    });
+    const rects = panels.map((panel) => panel.getBoundingClientRect());
+    if (!rects.length) return null;
+    return Math.min(...rects.map((rect) => rect.left));
+  }
+
+  function floatingMenuLeft(menu, panelLeft) {
+    const menuWidth = Math.max(58, Math.ceil(menu.getBoundingClientRect?.().width || 58));
+    const margin = 8;
+    const lowerBound = Math.max(8, Math.round(panelLeft) + margin);
+    const upperBound = Math.max(lowerBound + menuWidth, Math.round(window.innerWidth) - margin);
+    const occupied = visibleElements("button, [role='button']")
+      .filter((button) => !button.closest(`#${codexMateMenuId}`))
+      .map((button) => button.getBoundingClientRect())
+      .filter((rect) => rect.top < 44 && rect.bottom > 0 && rect.right > lowerBound && rect.left < upperBound)
+      .map((rect) => ({
+        left: Math.max(lowerBound, Math.floor(rect.left) - 4),
+        right: Math.min(upperBound, Math.ceil(rect.right) + 4),
+      }))
+      .sort((left, right) => right.left - left.left);
+    let cursor = upperBound;
+    for (const rect of occupied) {
+      if (cursor - rect.right >= menuWidth) return cursor - menuWidth;
+      cursor = Math.min(cursor, rect.left - margin);
+    }
+    if (cursor - lowerBound >= menuWidth) return cursor - menuWidth;
+    return lowerBound;
+  }
+
+  function placeCodexMateMenu(menu, insertionPoint) {
+    const panelLeft = visibleRightPanelLeft();
+    if (panelLeft !== null) {
+      menu.className = "codex-mate-menu-floating";
+      menu.style.left = `${floatingMenuLeft(menu, panelLeft)}px`;
+      menu.style.right = "auto";
+      if (menu.parentElement !== document.documentElement) document.documentElement.appendChild(menu);
+      return;
+    }
+    menu.style.left = "";
+    menu.style.right = "";
+    if (insertionPoint) {
+      menu.className = "";
+      const safeBefore = insertionPoint.before?.parentElement === insertionPoint.parent ? insertionPoint.before : null;
+      if (menu.parentElement !== insertionPoint.parent) {
+        insertionPoint.parent.insertBefore(menu, safeBefore);
+      }
+    } else {
+      menu.className = "codex-mate-menu-floating";
+      if (menu.parentElement !== document.documentElement) document.documentElement.appendChild(menu);
+    }
+  }
+
+  function configureCodexMateFileButton(menu, nativeButtonClass) {
+    menu.querySelectorAll('[data-codex-mate-open-files="true"]').forEach((button, index) => {
+      if (index > 0 || button.dataset.codexMateFileButtonVersion !== codexMateFileButtonVersion) button.remove();
+    });
+    let button = menu.querySelector('[data-codex-mate-open-files="true"]');
+    if (!button) {
+      button = document.createElement("button");
+      button.type = "button";
+      button.className = "codex-mate-toolbar-button codex-mate-file-button";
+      button.setAttribute("aria-label", "文件列表");
+      button.setAttribute("title", "文件列表");
+      button.dataset.codexMateOpenFiles = "true";
+      button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h4l2 2h7A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z"></path></svg>';
+      menu.appendChild(button);
+    }
+    button.className = "codex-mate-toolbar-button codex-mate-file-button";
+    button.dataset.codexMateFileButtonVersion = codexMateFileButtonVersion;
+    if (button.dataset.codexMateFileButtonInstalled === codexMateFileButtonVersion) return;
+    button.dataset.codexMateFileButtonInstalled = codexMateFileButtonVersion;
+    ["pointerdown", "mousedown", "mouseup", "touchstart"].forEach((eventName) => {
+      button.addEventListener(eventName, (event) => {
+        event.stopPropagation();
+        event.stopImmediatePropagation?.();
+      }, true);
+    });
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation?.();
+      void openNativeFilePanel().finally(() => {
+        setTimeout(installCodexMateMenu, 100);
+      });
     }, true);
   }
 
@@ -463,32 +828,33 @@
     const existing = document.getElementById(codexMateMenuId);
     removeDuplicateCodexMateMenus(existing);
     let insertionPoint = findNativeMenuInsertionPoint();
-    if (existing && existing.dataset.codexMateMenuVersion !== "5") {
+    if (existing && existing.dataset.codexMateMenuVersion !== codexMateMenuVersion) {
       existing.remove();
       insertionPoint = findNativeMenuInsertionPoint();
-    } else if (existing && insertionPoint && existing.parentElement === insertionPoint.parent) {
-      configureCodexMateTrigger(existing, existing.querySelector("button"), insertionPoint.nativeButtonClass);
+    } else if (existing && existing.isConnected) {
+      configureCodexMateTrigger(existing, existing.querySelector("button"), insertionPoint?.nativeButtonClass || "");
+      configureCodexMateFileButton(existing, insertionPoint?.nativeButtonClass || "");
+      placeCodexMateMenu(existing, insertionPoint);
       removeDuplicateCodexMateMenus(existing);
       return;
     }
     const menu = document.createElement("div");
     menu.id = codexMateMenuId;
     menu.dataset.codexMateMenu = "true";
-    menu.dataset.codexMateMenuVersion = "5";
+    menu.dataset.codexMateMenuVersion = codexMateMenuVersion;
+    ["pointerdown", "mousedown", "mouseup", "touchstart"].forEach((eventName) => {
+      menu.addEventListener(eventName, (event) => {
+        event.stopPropagation();
+      }, true);
+    });
     const trigger = document.createElement("button");
     trigger.type = "button";
-    trigger.textContent = `Codex Mate ${codexMateVersion}`;
+    trigger.textContent = "CM";
     const nativeButtonClass = insertionPoint?.nativeButtonClass || "codex-mate-trigger";
     configureCodexMateTrigger(menu, trigger, nativeButtonClass);
     menu.appendChild(trigger);
-    if (insertionPoint) {
-      menu.className = "";
-      const safeBefore = insertionPoint.before?.parentElement === insertionPoint.parent ? insertionPoint.before : null;
-      insertionPoint.parent.insertBefore(menu, safeBefore);
-    } else {
-      menu.className = "codex-mate-menu-floating";
-      document.documentElement.appendChild(menu);
-    }
+    configureCodexMateFileButton(menu, insertionPoint?.nativeButtonClass || "");
+    placeCodexMateMenu(menu, insertionPoint);
     removeDuplicateCodexMateMenus(menu);
   }
 

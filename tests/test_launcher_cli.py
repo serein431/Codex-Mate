@@ -182,10 +182,13 @@ def test_bridge_routes_update_requests(tmp_path):
 
 
 def test_bridge_rejects_removed_file_tree_requests(tmp_path):
-    payload = launcher.handle_bridge_request(object(), "/file-tree/roots", {})
+    class Service:
+        pass
 
-    assert payload["status"] == "failed"
-    assert payload["message"] == "Unknown bridge path"
+    result = launcher.handle_bridge_request(Service(), "/file-tree/roots", {"thread_id": "local:t1"})
+
+    assert result["status"] == "failed"
+    assert result["message"] == "Unknown bridge path"
 
 
 def test_launch_codex_windows_allows_devtools_websocket_origin(monkeypatch):

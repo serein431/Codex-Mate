@@ -352,7 +352,7 @@ def test_sync_history_skips_locked_session_files_without_aborting(tmp_path, monk
     assert payload["model_provider"] == "current_provider"
 
 
-def test_sync_history_updates_session_meta_timestamp_to_latest_event(tmp_path):
+def test_sync_history_preserves_session_meta_timestamp_when_repairing_sidecars(tmp_path):
     home = tmp_path / ".codex"
     write_config(home)
     create_current_threads_db(home)
@@ -378,10 +378,10 @@ def test_sync_history_updates_session_meta_timestamp_to_latest_event(tmp_path):
 
     result = history_sync.sync_history_if_ready(history_sync.resolve_paths(home))
 
-    assert result["updated_session_files"] == 1
+    assert result["updated_session_files"] == 0
     first_line = json.loads(session_path.read_text(encoding="utf-8").splitlines()[0])
-    assert first_line["timestamp"] == "2026-01-01T00:09:08.765Z"
-    assert first_line["payload"]["timestamp"] == "2026-01-01T00:09:08.765Z"
+    assert first_line["timestamp"] == "2026-01-01T00:00:00.000Z"
+    assert first_line["payload"]["timestamp"] == "2026-01-01T00:00:00.000Z"
 
 
 def test_sync_history_skips_when_codex_state_is_missing(tmp_path):
@@ -431,6 +431,58 @@ def test_sync_history_if_ready_repairs_stale_index_without_backup_when_profile_m
     assert [entry["id"] for entry in index_entries] == ["current-thread", "current-thread-2"]
     assert index_entries[0]["thread_name"] == "Current Thread"
     assert index_entries[0]["updated_at"] == "1970-01-01T00:01:40Z"
+
+
+def test_sync_history_if_ready_repairs_stale_database_timestamp_from_rollout(tmp_path):
+    home = tmp_path / ".codex"
+    write_config(home)
+    session_path = write_session_file(home, "current-thread", "current_provider", "gpt-current")
+    session_path.write_text(
+        json.dumps(
+            {
+                "timestamp": "2026-01-01T00:00:00.000Z",
+                "type": "session_meta",
+                "payload": {"id": "current-thread", "model_provider": "current_provider", "model": "gpt-current"},
+            }
+        )
+        + "\n"
+        + json.dumps({"timestamp": "2026-01-01T00:07:06.321Z", "type": "event_msg", "payload": {"type": "token_count"}})
+        + "\n",
+        encoding="utf-8",
+    )
+    conn = sqlite3.connect(home / "state_5.sqlite")
+    try:
+        conn.execute(
+            """
+            CREATE TABLE threads (
+                id TEXT PRIMARY KEY,
+                title TEXT,
+                rollout_path TEXT,
+                updated_at INTEGER,
+                updated_at_ms INTEGER,
+                archived INTEGER DEFAULT 0,
+                model_provider TEXT,
+                model TEXT
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO threads (id, title, rollout_path, updated_at, updated_at_ms, archived, model_provider, model) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("current-thread", "Current Thread", str(session_path), 1767225600, 1767225600000, 0, "current_provider", "gpt-current"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    result = history_sync.sync_history_if_ready(history_sync.resolve_paths(home))
+
+    assert result["updated_database_timestamps"] == 1
+    assert result["updated_session_files"] == 0
+    with sqlite3.connect(home / "state_5.sqlite") as conn:
+        row = conn.execute("SELECT updated_at, updated_at_ms FROM threads WHERE id = ?", ("current-thread",)).fetchone()
+    assert row == (1767226026, 1767226026321)
+    index_entry = json.loads((home / "session_index.jsonl").read_text(encoding="utf-8"))
+    assert index_entry["updated_at"] == "2026-01-01T00:07:06Z"
 
 
 def test_sync_history_if_ready_syncs_when_profile_mismatches(tmp_path):

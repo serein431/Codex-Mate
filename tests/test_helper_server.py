@@ -1,7 +1,7 @@
 import json
 import threading
-import urllib.request
 from urllib.error import HTTPError
+import urllib.request
 
 from codex_mate.helper_server import HelperServer
 from codex_mate.models import DeleteResult, DeleteStatus, SessionRef
@@ -100,7 +100,7 @@ def test_helper_server_rejects_removed_file_tree_actions():
     try:
         base = f"http://127.0.0.1:{server.port}"
         try:
-            post_json(base + "/file-tree/roots", {})
+            post_json(base + "/file-tree/roots", {"thread_id": "local:t1"})
         except HTTPError as exc:
             assert exc.code == 404
         else:

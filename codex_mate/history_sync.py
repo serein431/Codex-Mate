@@ -185,6 +185,37 @@ def update_database_threads(paths: HistoryPaths, profile: CurrentProfile) -> dic
     return {"updated_database_rows": int(changed), "updated_fields": updated_fields}
 
 
+def repair_database_thread_timestamps(paths: HistoryPaths) -> dict[str, object]:
+    with connect_db(paths.db_path) as conn:
+        if not table_exists(conn, "threads"):
+            return {"updated_database_timestamps": 0, "skipped_database_timestamp_repair": "missing threads table"}
+        columns = table_columns(conn, "threads")
+        required = {"id", "rollout_path", "updated_at", "updated_at_ms"}
+        if not required.issubset(columns):
+            return {
+                "updated_database_timestamps": 0,
+                "skipped_database_timestamp_repair": "missing timestamp columns",
+            }
+        rows = conn.execute("SELECT id, rollout_path, updated_at, updated_at_ms FROM threads").fetchall()
+        updates: list[tuple[int, int, str]] = []
+        for row in rows:
+            rollout_path = row["rollout_path"]
+            if not rollout_path:
+                continue
+            latest_timestamp = latest_session_timestamp_ms(Path(str(rollout_path)))
+            if latest_timestamp is None:
+                continue
+            current_ms = int(row["updated_at_ms"] or 0)
+            if latest_timestamp > current_ms:
+                updates.append((latest_timestamp // 1000, latest_timestamp, str(row["id"])))
+        if not updates:
+            return {"updated_database_timestamps": 0}
+        conn.execute("BEGIN IMMEDIATE")
+        conn.executemany("UPDATE threads SET updated_at = ?, updated_at_ms = ? WHERE id = ?", updates)
+        conn.commit()
+    return {"updated_database_timestamps": len(updates)}
+
+
 def update_session_files(paths: HistoryPaths, profile: CurrentProfile) -> dict[str, object]:
     changed = 0
     skipped: list[str] = []
@@ -209,19 +240,11 @@ def update_session_files(paths: HistoryPaths, profile: CurrentProfile) -> dict[s
         current_provider = str(payload.get("model_provider") or "")
         current_model = str(payload.get("model") or "") if payload.get("model") else None
         model_matches = profile.model is None or current_model == profile.model
-        latest_timestamp = latest_session_timestamp_ms(path)
-        latest_timestamp_text = iso_from_unix_ms_precise(latest_timestamp) if latest_timestamp is not None else None
-        timestamp_matches = latest_timestamp_text is None or (
-            item.get("timestamp") == latest_timestamp_text and payload.get("timestamp") == latest_timestamp_text
-        )
-        if current_provider == profile.provider and model_matches and timestamp_matches:
+        if current_provider == profile.provider and model_matches:
             continue
         payload["model_provider"] = profile.provider
         if profile.model:
             payload["model"] = profile.model
-        if latest_timestamp_text:
-            item["timestamp"] = latest_timestamp_text
-            payload["timestamp"] = latest_timestamp_text
         new_first = json.dumps(item, ensure_ascii=False, separators=(",", ":"))
         try:
             atomic_write_text(path, new_first + (ending + remainder if ending else "\n"))
@@ -242,10 +265,6 @@ def iso_from_unix_ms(value: int | None) -> str:
     if not value:
         return iso_from_unix(None)
     return datetime.fromtimestamp(int(value) / 1000, tz=UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-
-
-def iso_from_unix_ms_precise(value: int) -> str:
-    return datetime.fromtimestamp(int(value) / 1000, tz=UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z")
 
 
 def parse_timestamp_ms(value: object) -> int | None:
@@ -561,6 +580,7 @@ def sync_history_to_current_profile(paths: HistoryPaths) -> dict[str, object]:
     profile = read_current_profile(paths)
     db_backup = make_backup(paths)
     db_result = update_database_threads(paths, profile)
+    timestamp_result = repair_database_thread_timestamps(paths)
     session_result = update_session_files(paths, profile)
     index_result = merge_session_index(paths)
     global_state_result = sync_global_state(paths)
@@ -571,6 +591,7 @@ def sync_history_to_current_profile(paths: HistoryPaths) -> dict[str, object]:
         "current_model": profile.model,
         "backup_path": str(db_backup),
         **db_result,
+        **timestamp_result,
         **session_result,
         **index_result,
         **global_state_result,
@@ -588,16 +609,19 @@ def sync_history_if_ready(paths: HistoryPaths) -> dict[str, object]:
         sidecar_result: dict[str, object] = {}
         if not current_status.get("skipped_database_status"):
             profile = read_current_profile(paths)
+            timestamp_result = repair_database_thread_timestamps(paths)
             session_result = update_session_files(paths, profile)
             index_result = merge_session_index(paths)
             global_state_result = sync_global_state(paths)
             sidecar_repaired = (
-                bool(session_result.get("updated_session_files"))
+                bool(timestamp_result.get("updated_database_timestamps"))
+                or bool(session_result.get("updated_session_files"))
                 or bool(index_result.get("updated_session_index"))
                 or bool(global_state_result.get("updated_global_state"))
             )
             sidecar_result = {
                 "sidecar_repaired": sidecar_repaired,
+                **timestamp_result,
                 **session_result,
                 **index_result,
                 **global_state_result,

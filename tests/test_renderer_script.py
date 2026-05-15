@@ -214,7 +214,7 @@ def test_renderer_script_sidebar_delete_opens_on_pointerup_when_click_is_unrelia
 
     text = Path("codex_mate/inject/renderer-inject.js").read_text(encoding="utf-8")
     assert "updateDeleteButtonOffsets" in text
-    assert "codexDeleteStyleVersion = \"6\"" in text
+    assert "codexDeleteStyleVersion = \"9\"" in text
     assert "right: 66px" in text
     assert "确认" in text
     assert "归档对话" in text
@@ -287,13 +287,46 @@ def test_renderer_script_uses_chinese_delete_toast_fallbacks():
     assert "Undo finished" not in text
 
 
-def test_renderer_script_does_not_include_project_file_tree_panel():
+def test_renderer_script_does_not_include_legacy_project_file_tree_panel():
     text = Path("codex_mate/inject/renderer-inject.js").read_text(encoding="utf-8")
 
     assert "projectFileTree" not in text
     assert "项目文件树" not in text
-    assert "codex-file-tree" not in text
-    assert "/file-tree/" not in text
+
+
+def test_renderer_script_adds_entry_for_file_tree_panel():
+    text = Path("codex_mate/inject/renderer-inject.js").read_text(encoding="utf-8")
+
+    assert "data-codex-mate-open-files" in text
+    assert "codex-mate-file-button" in text
+    assert "function findNativeFilePanelButton" in text
+    assert "function findNativeReviewFileButton" in text
+    assert "function isInsideReviewPanel" in text
+    assert "function isUnsafeNativeFilePanelButton" in text
+    assert "isInsideReviewPanel(button)" in text
+    assert "codex-review-diff-card" in text
+    assert "在编辑器中打开|Open in editor|Cursor|VS Code|打开文件|Open file" in text
+    assert "rect.top >= 40" in text
+    assert "rect.bottom < 0" in text
+    assert "function openNativeWorkspaceFileTab" in text
+    assert "function firstNativeFileSearchResult" in text
+    assert "function activateNativeFileSearchResult" in text
+    assert "file-search-command-menu" in text
+    assert "KeyboardEvent(\"keydown\", { key: \"Enter\"" in text
+    assert "_valueTracker" in text
+    assert "function openNativeFilePanel" in text
+    assert "筛选文件" in text
+    assert "文件列表" in text
+    assert "在审查中显示文件" in text
+    assert "codexMateFileButtonVersion = \"16\"" in text
+    assert "没有找到可打开的原生文件入口" in text
+    assert "原生文件树没有响应" in text
+    assert "function codexFetch" not in text
+    assert "sendMessageFromView" not in text
+    assert "function openCodexMateFileTreePanel" not in text
+    assert "function renderCodexMateFileTree" not in text
+    assert 'postJson("/file-tree/roots"' not in text
+    assert 'postJson("/file-tree/list"' not in text
 
 
 def test_renderer_script_delegated_clicks_tolerate_text_targets():
@@ -348,13 +381,17 @@ def test_renderer_script_does_not_include_fast_mode_patch():
     assert "codex-mate-menu-floating" in text
     assert "findNativeMenuInsertionPoint" in text
     assert "if (!codexMateSettings().nativeMenuPlacement) return null" in text
-    assert "right: 140px" in text
+    assert "top: 8px" in text
+    assert "right: 196px" in text
     assert "left: auto" in text
     assert "pointer-events: auto" in text
     assert "-webkit-app-region: no-drag" in text
     assert ".codex-mate-trigger" in text
+    assert "trigger.textContent = \"CM\"" in text
+    assert "data-codex-mate-compact" in text
     assert "app-header-tint" in text
-    assert "flex items-center gap-0.5" in text
+    assert "ms-auto" in text
+    assert "rect.left < window.innerWidth * 0.55" in text
     assert "codex-mate-menu-floating" in text
     assert "nativeButtonClass" in text
     assert "removeDuplicateCodexMateMenus" in text
@@ -362,8 +399,24 @@ def test_renderer_script_does_not_include_fast_mode_patch():
     assert 'const legacyMenuId = "codex-" + "plus-menu"' in text
     assert 'const legacyMenuAttribute = "data-codex-" + "plus-menu"' in text
     assert 'const legacyMenuName = "Codex" + "++"' in text
-    assert "label === `Codex Mate ${codexMateVersion}`" in text
+    assert "label.startsWith(\"Codex Mate\")" in text
     assert "label.startsWith(legacyMenuName)" in text
-    assert "codexMateMenuVersion = \"5\"" in text
-    assert "codexMateTriggerInstalled = \"5\"" in text
+    assert "codexMateMenuVersion = \"16\"" in text
+    assert "codexMateTriggerInstalled = \"16\"" in text
+    assert "codexMateFileButtonVersion = \"16\"" in text
+    assert "function visibleRightPanelLeft" in text
+    assert "[role='tabpanel'], .absolute.top-0.bottom-0.left-0" in text
+    assert "function floatingMenuLeft" in text
+    assert "function placeCodexMateMenu" in text
+    assert "Math.round(panelLeft) + margin" in text
+    assert "Math.round(window.innerWidth) - margin" in text
+    assert "rect.top < 44" in text
+    assert "cursor - rect.right >= menuWidth" in text
+    assert '.ms-auto.flex.shrink-0.items-center.gap-1\\\\.5' in text
+    assert 'existing && existing.isConnected' in text
+    assert "setTimeout(installCodexMateMenu, 100)" in text
+    assert 'event.stopImmediatePropagation?.()' in text
+    assert ".codex-mate-toolbar-button" in text
+    assert 'trigger.className = "codex-mate-toolbar-button codex-mate-trigger"' in text
+    assert 'button.className = "codex-mate-toolbar-button codex-mate-file-button"' in text
     assert ".codex-mate-trigger:hover" not in text
