@@ -181,6 +181,30 @@ def test_bridge_routes_update_requests(tmp_path):
     assert launcher.handle_bridge_request(Service(), "/update", {}) == {"status": "updated"}
 
 
+def test_bridge_routes_workspace_first_file(tmp_path):
+    class Service:
+        def workspace_first_file(self):
+            return {"status": "ok", "name": "README.md"}
+
+    assert launcher.handle_bridge_request(Service(), "/workspace/first-file", {}) == {"status": "ok", "name": "README.md"}
+
+
+def test_update_service_reports_first_workspace_file(monkeypatch, tmp_path):
+    (tmp_path / ".env").write_text("SECRET=1\n", encoding="utf-8")
+    first = tmp_path / "b.py"
+    first.write_text("print('b')\n", encoding="utf-8")
+    (tmp_path / "a_dir").mkdir()
+    (tmp_path / "a_dir" / "nested.py").write_text("print('nested')\n", encoding="utf-8")
+    second = tmp_path / "a.py"
+    second.write_text("print('a')\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    service = launcher.ApiFirstDeleteService(launcher.UnavailableApiAdapter(), None, tmp_path / "backups")
+
+    result = service.workspace_first_file()
+
+    assert result == {"status": "ok", "name": "a.py"}
+
+
 def test_bridge_rejects_removed_file_tree_requests(tmp_path):
     class Service:
         pass

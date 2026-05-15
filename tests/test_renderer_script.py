@@ -309,16 +309,28 @@ def test_renderer_script_adds_entry_for_file_tree_panel():
     assert "rect.top >= 40" in text
     assert "rect.bottom < 0" in text
     assert "function openNativeWorkspaceFileTab" in text
+    assert "async function nativeFileSearchTerms" in text
+    assert "function nativeWorkspaceFirstFileNameTerms" in text
+    assert 'postJson("/workspace/first-file", {})' in text
+    assert "function closeNativeFileSearch" in text
+    assert "function closeAnyNativeFileSearch" in text
+    assert "await nativeFileSearchTerms()" in text
+    assert "Date.now() + 6000" in text
+    assert '"pyproject", "README", "package", "AGENTS", ".gitignore", "main", "index", "src"' in text
     assert "function firstNativeFileSearchResult" in text
     assert "function activateNativeFileSearchResult" in text
     assert "file-search-command-menu" in text
     assert "KeyboardEvent(\"keydown\", { key: \"Enter\"" in text
+    assert "KeyboardEvent(\"keypress\", { key: \"Enter\"" in text
+    assert "KeyboardEvent(\"keyup\", { key: \"Escape\"" in text
+    assert "await delay(450)" in text
+    assert "No results|No files|Search files|搜索文件" in text
     assert "_valueTracker" in text
     assert "function openNativeFilePanel" in text
     assert "筛选文件" in text
     assert "文件列表" in text
     assert "在审查中显示文件" in text
-    assert "codexMateFileButtonVersion = \"16\"" in text
+    assert "codexMateFileButtonVersion = \"22\"" in text
     assert "没有找到可打开的原生文件入口" in text
     assert "原生文件树没有响应" in text
     assert "function codexFetch" not in text
@@ -401,9 +413,9 @@ def test_renderer_script_does_not_include_fast_mode_patch():
     assert 'const legacyMenuName = "Codex" + "++"' in text
     assert "label.startsWith(\"Codex Mate\")" in text
     assert "label.startsWith(legacyMenuName)" in text
-    assert "codexMateMenuVersion = \"16\"" in text
-    assert "codexMateTriggerInstalled = \"16\"" in text
-    assert "codexMateFileButtonVersion = \"16\"" in text
+    assert "codexMateMenuVersion = \"22\"" in text
+    assert "codexMateTriggerInstalled = \"22\"" in text
+    assert "codexMateFileButtonVersion = \"22\"" in text
     assert "function visibleRightPanelLeft" in text
     assert "[role='tabpanel'], .absolute.top-0.bottom-0.left-0" in text
     assert "function floatingMenuLeft" in text

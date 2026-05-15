@@ -31,6 +31,9 @@ class FakeDeleteService:
     def update(self):
         return {"status": "updated", "latest_version": "v9.9.9"}
 
+    def workspace_first_file(self):
+        return {"status": "ok", "name": "AGENTS.md"}
+
 
 def post_json(url, payload):
     data = json.dumps(payload).encode("utf-8")
@@ -90,6 +93,21 @@ def test_helper_server_routes_update_actions():
 
     assert checked["status"] == "available"
     assert updated["status"] == "updated"
+
+
+def test_helper_server_routes_workspace_first_file():
+    service = FakeDeleteService()
+    server = HelperServer("127.0.0.1", 0, service)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base = f"http://127.0.0.1:{server.port}"
+        result = post_json(base + "/workspace/first-file", {})
+    finally:
+        server.shutdown()
+        thread.join(timeout=3)
+
+    assert result == {"status": "ok", "name": "AGENTS.md"}
 
 
 def test_helper_server_rejects_removed_file_tree_actions():

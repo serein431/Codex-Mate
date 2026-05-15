@@ -8,9 +8,9 @@
   const codexArchiveDeleteAllVersion = "2";
   const codexMateVersion = window.__CODEX_MATE_VERSION__ || "dev";
   const codexMateSettingsKey = "codexMateSettings";
-  const codexMateMenuVersion = "16";
-  const codexMateTriggerInstalled = "16";
-  const codexMateFileButtonVersion = "16";
+  const codexMateMenuVersion = "22";
+  const codexMateTriggerInstalled = "22";
+  const codexMateFileButtonVersion = "22";
 
   function closestElement(target, selector) {
     const element = target?.nodeType === 1 ? target : target?.parentElement;
@@ -654,11 +654,67 @@
     }) || null;
   }
 
+  function fileSearchTermVariants(name) {
+    const cleaned = String(name || "").trim();
+    if (!cleaned) return [];
+    const variants = [cleaned];
+    const stem = cleaned.replace(/\.[^.]+$/, "");
+    if (stem && stem !== cleaned) variants.push(stem);
+    return variants;
+  }
+
+  async function nativeWorkspaceFirstFileNameTerms() {
+    try {
+      const result = await withTimeout(postJson("/workspace/first-file", {}), 1200, "读取当前目录文件超时");
+      return result?.status === "ok" ? fileSearchTermVariants(result.name) : [];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  async function nativeFileSearchTerms() {
+    const terms = await nativeWorkspaceFirstFileNameTerms();
+    const filePattern = /(?:^|[\s([{"'`>])([A-Za-z0-9_.@+-]+\.[A-Za-z0-9]{1,8})(?=$|[\s)\]}"'`<,:;])/g;
+    Array.from(document.querySelectorAll("[aria-label], [title], [data-value], [role='tab'], [role='button'], button")).forEach((element) => {
+      const text = [
+        element.getAttribute?.("aria-label"),
+        element.getAttribute?.("title"),
+        element.getAttribute?.("data-value"),
+        element.textContent,
+      ].filter(Boolean).join(" ");
+      let match = filePattern.exec(text);
+      while (match) {
+        const fileName = match[1];
+        terms.push(...fileSearchTermVariants(fileName));
+        match = filePattern.exec(text);
+      }
+    });
+    terms.push(".", "pyproject", "README", "package", "AGENTS", ".gitignore", "main", "index", "src");
+    terms.push("a", "e", "i", "o", "s", "t", "n", "r");
+    return Array.from(new Set(terms.filter((term) => term.length <= 80)));
+  }
+
+  function closeNativeFileSearch(input) {
+    input?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true, cancelable: true }));
+    input?.dispatchEvent(new KeyboardEvent("keyup", { key: "Escape", code: "Escape", bubbles: true, cancelable: true }));
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true, cancelable: true }));
+    document.dispatchEvent(new KeyboardEvent("keyup", { key: "Escape", code: "Escape", bubbles: true, cancelable: true }));
+  }
+
+  function closeAnyNativeFileSearch() {
+    closeNativeFileSearch(nativeFileSearchInput());
+  }
+
   function firstNativeFileSearchResult() {
     return visibleElements("[role='option'], [cmdk-item], [data-value]").find((element) => {
       const value = element.getAttribute("data-value") || element.getAttribute("value") || "";
       const text = element.textContent || "";
-      return !/^文件$|^Files$/i.test(value) && /(^|[\s/])\.gitignore\b|\.(md|py|toml|json|txt|js|ts|tsx|jsx|yml|yaml|bat|command)\b/i.test(`${value} ${text}`);
+      const combined = `${value} ${text}`.trim();
+      if (!combined || /^文件$|^Files$/i.test(value)) return false;
+      if (/未找到|没有结果|No results|No files|Search files|搜索文件/i.test(combined)) return false;
+      if (/输入内容搜索文件|Type to search files/i.test(combined)) return false;
+      if (element.getAttribute("aria-disabled") === "true") return false;
+      return /(^|[\s/])\.gitignore\b|[/\\]|\.[A-Za-z0-9]{1,8}\b/.test(combined) || (!!value && value !== "command-menu-first-file-item");
     }) || null;
   }
 
@@ -675,33 +731,38 @@
   }
 
   function activateNativeFileSearchResult(result, input) {
-    result.focus?.();
-    result.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerType: "mouse" }));
-    result.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
-    result.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerType: "mouse" }));
-    result.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true, view: window }));
-    result.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, view: window }));
+    input?.focus?.();
     input?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true, cancelable: true }));
+    input?.dispatchEvent(new KeyboardEvent("keypress", { key: "Enter", code: "Enter", bubbles: true, cancelable: true }));
     input?.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", code: "Enter", bubbles: true, cancelable: true }));
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true, cancelable: true }));
+    document.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", code: "Enter", bubbles: true, cancelable: true }));
   }
 
   async function openNativeWorkspaceFileTab() {
-    const searchTerms = ["pyproject", "AGENTS", "README", "package", ".gitignore", "md", "."];
+    const searchTerms = (await nativeFileSearchTerms()).slice(0, 14);
+    const deadline = Date.now() + 6000;
     for (const term of searchTerms) {
+      if (Date.now() > deadline) break;
       window.postMessage({ type: "file-search-command-menu" }, "*");
       const input = await waitForElement(nativeFileSearchInput, 1200);
-      if (!input) continue;
-      setNativeInputValue(input, term);
-      const result = await waitForElement(firstNativeFileSearchResult, 2200);
-      if (!result) {
-        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true, cancelable: true }));
+      if (!input) {
+        closeAnyNativeFileSearch();
         continue;
       }
+      setNativeInputValue(input, term);
+      const result = await waitForElement(firstNativeFileSearchResult, term ? 900 : 900);
+      if (!result) {
+        closeNativeFileSearch(input);
+        continue;
+      }
+      await delay(450);
       activateNativeFileSearchResult(result, input);
       if (await waitForElement(nativeFilePanelVisible, 1800)) return true;
       if (await waitForElement(findNativeFilePanelButton, 2200)) return true;
+      closeNativeFileSearch(input);
     }
+    closeAnyNativeFileSearch();
     return false;
   }
 
@@ -714,6 +775,7 @@
     }
     const openedFile = await openNativeWorkspaceFileTab();
     if (!openedFile) {
+      closeAnyNativeFileSearch();
       showToast("没有找到可打开的原生文件入口", null);
       return false;
     }

@@ -130,6 +130,19 @@ class ApiFirstDeleteService:
         finally:
             self._update_lock.release()
 
+    def workspace_first_file(self) -> dict[str, object]:
+        try:
+            files = [entry for entry in Path.cwd().iterdir() if entry.is_file()]
+        except OSError as exc:
+            return {"status": "failed", "name": "", "message": str(exc)}
+        files = sorted(
+            files,
+            key=lambda entry: (entry.name.startswith("."), entry.name.lower()),
+        )
+        if not files:
+            return {"status": "not_found", "name": "", "message": "当前目录没有可搜索的文件"}
+        return {"status": "ok", "name": files[0].name}
+
     def _release_payload(self, status: str, release: updater.Release, message: str, *, can_update: bool) -> dict[str, object]:
         return {
             "status": status,
@@ -511,4 +524,6 @@ def handle_bridge_request(service: ApiFirstDeleteService, path: str, payload: di
         return service.check_update()
     if path == "/update":
         return service.update()
+    if path == "/workspace/first-file":
+        return service.workspace_first_file()
     return {"status": DeleteStatus.FAILED.value, "session_id": str(payload.get("session_id", "")), "message": "Unknown bridge path"}

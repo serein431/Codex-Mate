@@ -13,6 +13,7 @@ class DeleteService(Protocol):
     def find_archived_thread_by_title(self, title: str) -> SessionRef | None: ...
     def check_update(self) -> dict[str, object]: ...
     def update(self) -> dict[str, object]: ...
+    def workspace_first_file(self) -> dict[str, object]: ...
 
 
 class HelperServer(ThreadingHTTPServer):
@@ -57,6 +58,9 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             if self.path == "/update":
                 self._send_json(self.server.service.update())
+                return
+            if self.path == "/workspace/first-file":
+                self._send_json(self.server.service.workspace_first_file())
                 return
             self._send_json({"error": "not found"}, status=404)
         except Exception as exc:
