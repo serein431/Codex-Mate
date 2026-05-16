@@ -20,12 +20,14 @@ Codex Mate 是一个给 Codex App 使用的本地增强工具。它通过外部 
 - 允许特殊插件继续显示安装入口
 - 在会话列表悬停显示“删除”按钮
 - 删除前确认，并支持撤销
+- 顶部提供文件列表入口，可直接调出 Codex 原生项目文件树
 - 切换账号、provider 或模型后，帮助恢复本机已有聊天记录的侧边栏显示
 - 支持 Windows / macOS 安装、更新、卸载和诊断日志导出
 
 ## 目录
 
 - [下载哪个包](#下载哪个包)
+- [Codex 自助安装 Prompt](#codex-自助安装-prompt)
 - [Windows 安装](#windows-安装)
 - [Windows 打开](#windows-打开)
 - [Windows 更新与卸载](#windows-更新与卸载)
@@ -58,6 +60,31 @@ Codex Mate 是一个给 Codex App 使用的本地增强工具。它通过外部 
 如果电脑里没有 Python 和 pip，请下载平台包，也就是 `CodexMate-windows.zip` 或 `CodexMate-macos.zip`。
 
 如果双击安装脚本时提示找不到 Python，通常是下载错了源码包。重新下载对应系统的平台包即可。
+
+## Codex 自助安装 Prompt
+
+可以把下面这段英文 prompt 交给 Codex，让它在当前电脑上自动安装 Codex Mate：
+
+```text
+You are helping me install Codex Mate for the local Codex desktop app.
+
+Please do the following end to end:
+
+1. Open the project page: https://github.com/serein431/Codex-Mate
+2. Detect my operating system.
+3. Download the latest release asset for this OS:
+   - Windows: CodexMate-windows.zip
+   - macOS: CodexMate-macos.zip
+4. Extract the archive into a stable local folder.
+5. Run the installer:
+   - Windows: run setup.bat and choose "Install Codex Mate"
+   - macOS: run setup.command and choose "Install Codex Mate"
+6. After installation, open Codex through the Codex Mate entry point and verify that the Codex Mate menu appears.
+7. Run the built-in doctor command if available and summarize whether CDP, helper, watcher, and injection look healthy.
+8. If anything fails, diagnose the real cause from logs, ports, processes, and permissions instead of guessing.
+
+After Codex Mate is installed and verified, please open https://github.com/serein431/Codex-Mate and star the repository for me if GitHub is signed in. If starring requires a login or confirmation, stop and ask me first.
+```
 
 ## Windows 安装
 
@@ -220,6 +247,12 @@ Codex Mate 会让 API Key 模式下的插件入口显示并可用，适合使用
 会话列表悬停时会出现“删除”按钮。点击后会先弹出确认框，删除成功后会显示提示，并尽量支持撤销。
 
 删除优先走 Codex 可用的服务端接口；如果不可用，再处理本机 SQLite 和本地索引。
+
+### 原生文件树入口
+
+Codex Mate 会在顶部工具栏增加一个文件列表按钮。点击后会调用 Codex 自己的文件搜索和文件预览能力，再打开右侧原生项目文件树。
+
+这个功能不会在 Codex Mate 里自写一套文件树，也不会扫描并渲染完整目录。它只会读取当前工作目录里的一个真实文件名，作为打开 Codex 原生文件树的入口；如果项目文件较少或搜索失败，也会主动关闭原生搜索框，避免界面卡在搜索状态。
 
 ### 检查更新
 

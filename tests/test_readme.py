@@ -24,6 +24,7 @@ def test_readme_includes_codex_mate_icon_and_toc():
     assert 'width="220"' in text
     assert "## 目录" in text
     assert "- [下载哪个包](#下载哪个包)" in text
+    assert "- [Codex 自助安装 Prompt](#codex-自助安装-prompt)" in text
     assert "- [Windows 安装](#windows-安装)" in text
     assert "- [Windows 打开](#windows-打开)" in text
     assert "- [macOS 安装](#macos-安装)" in text
@@ -83,6 +84,7 @@ def test_readme_describes_one_click_install_script():
     text = Path("README.md").read_text(encoding="utf-8")
 
     assert "## 下载哪个包" in text
+    assert "## Codex 自助安装 Prompt" in text
     assert "## Windows 安装" in text
     assert "## macOS 安装" in text
     assert "CodexMate-windows.zip" in text
@@ -96,6 +98,17 @@ def test_readme_describes_one_click_install_script():
     assert "如果电脑里没有 Python 和 pip" in text
 
 
+def test_readme_includes_english_codex_install_prompt():
+    text = Path("README.md").read_text(encoding="utf-8")
+
+    assert "You are helping me install Codex Mate for the local Codex desktop app." in text
+    assert "Download the latest release asset for this OS" in text
+    assert "Run the installer" in text
+    assert "verify that the Codex Mate menu appears" in text
+    assert "star the repository for me" in text
+    assert "If starring requires a login or confirmation, stop and ask me first." in text
+
+
 def test_readme_describes_in_app_update_controls():
     text = Path("README.md").read_text(encoding="utf-8")
 
@@ -106,11 +119,15 @@ def test_readme_describes_in_app_update_controls():
     assert "CodexMate-windows.zip" in text
 
 
-def test_readme_does_not_advertise_project_file_tree():
+def test_readme_describes_native_file_tree_entry():
     text = Path("README.md").read_text(encoding="utf-8")
 
-    assert "项目文件树" not in text
-    assert "文件树" not in text
+    assert "顶部提供文件列表入口" in text
+    assert "## 功能说明" in text
+    assert "### 原生文件树入口" in text
+    assert "Codex 自己的文件搜索和文件预览能力" in text
+    assert "不会在 Codex Mate 里自写一套文件树" in text
+    assert "当前工作目录里的一个真实文件名" in text
     assert "256KB" not in text
 
 
