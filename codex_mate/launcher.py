@@ -310,14 +310,18 @@ def activate_packaged_app(app_user_model_id: str, arguments: str) -> int:
 
 
 def launch_codex_app(app_dir: Path, debug_port: int) -> Any:
-    app_user_model_id = packaged_app_user_model_id(app_dir) if sys.platform == "win32" else None
-    if app_user_model_id:
-        return activate_packaged_app(app_user_model_id, subprocess.list2cmdline(build_codex_arguments(debug_port)))
     if app_dir.suffix == ".app":
         prepare_macos_codex_relaunch(debug_port)
         subprocess.run(["open", str(app_dir), "--args", *build_codex_arguments(debug_port)], check=True)
         return None
-    return subprocess.Popen(build_codex_command(app_dir, debug_port))
+    command = build_codex_command(app_dir, debug_port)
+    app_user_model_id = packaged_app_user_model_id(app_dir) if sys.platform == "win32" else None
+    if app_user_model_id:
+        try:
+            return subprocess.Popen(command)
+        except OSError:
+            return activate_packaged_app(app_user_model_id, subprocess.list2cmdline(build_codex_arguments(debug_port)))
+    return subprocess.Popen(command)
 
 
 def cdp_port_ready(port: int) -> bool:

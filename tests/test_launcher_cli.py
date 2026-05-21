@@ -310,7 +310,7 @@ def test_packaged_app_user_model_id_ignores_non_packaged_path():
     assert packaged_app_user_model_id(app_dir) is None
 
 
-def test_launch_uses_packaged_activation_for_windowsapps(monkeypatch):
+def test_launch_prefers_direct_executable_for_windowsapps(monkeypatch):
     app_dir = Path("C:/Program Files/WindowsApps/OpenAI.Codex_26.506.2212.0_x64__2p2nqsd0c76g0/app")
     activated = []
     launched = []
@@ -322,13 +322,33 @@ def test_launch_uses_packaged_activation_for_windowsapps(monkeypatch):
     )
     monkeypatch.setattr(launcher.subprocess, "Popen", lambda command: launched.append(command))
 
+    assert launcher.launch_codex_app(app_dir, 9229) is None
+
+    assert activated == []
+    assert launched == [build_codex_command(app_dir, 9229)]
+
+
+def test_launch_falls_back_to_packaged_activation_when_direct_launch_fails(monkeypatch):
+    app_dir = Path("C:/Program Files/WindowsApps/OpenAI.Codex_26.506.2212.0_x64__2p2nqsd0c76g0/app")
+    activated = []
+    monkeypatch.setattr(launcher.sys, "platform", "win32")
+    monkeypatch.setattr(
+        launcher,
+        "activate_packaged_app",
+        lambda aumid, arguments: activated.append((aumid, arguments)) or 1234,
+    )
+
+    def fail_direct_launch(command):
+        raise PermissionError(str(command))
+
+    monkeypatch.setattr(launcher.subprocess, "Popen", fail_direct_launch)
+
     assert launcher.launch_codex_app(app_dir, 9229) == 1234
 
     assert activated == [(
         "OpenAI.Codex_2p2nqsd0c76g0!App",
         "--remote-debugging-port=9229 --remote-allow-origins=http://127.0.0.1:9229",
     )]
-    assert launched == []
 
 
 def test_windows_packaged_activation_uses_local_server_context():
