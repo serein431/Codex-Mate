@@ -11,9 +11,10 @@ class DeleteService(Protocol):
     def delete(self, session: SessionRef) -> DeleteResult: ...
     def undo(self, token: str) -> DeleteResult: ...
     def find_archived_thread_by_title(self, title: str) -> SessionRef | None: ...
+    def export_markdown(self, session: SessionRef) -> dict[str, object]: ...
     def check_update(self) -> dict[str, object]: ...
     def update(self) -> dict[str, object]: ...
-    def workspace_first_file(self) -> dict[str, object]: ...
+    def backend_status(self) -> dict[str, object]: ...
 
 
 class HelperServer(ThreadingHTTPServer):
@@ -53,14 +54,18 @@ class _Handler(BaseHTTPRequestHandler):
                 session = self.server.service.find_archived_thread_by_title(str(payload.get("title", "")))
                 self._send_json({"session_id": session.session_id, "title": session.title} if session else {"session_id": "", "title": ""})
                 return
+            if self.path == "/export-markdown":
+                session = SessionRef(session_id=str(payload.get("session_id", "")), title=str(payload.get("title", "")))
+                self._send_json(self.server.service.export_markdown(session))
+                return
             if self.path == "/check-update":
                 self._send_json(self.server.service.check_update())
                 return
             if self.path == "/update":
                 self._send_json(self.server.service.update())
                 return
-            if self.path == "/workspace/first-file":
-                self._send_json(self.server.service.workspace_first_file())
+            if self.path == "/backend/status":
+                self._send_json(self.server.service.backend_status())
                 return
             self._send_json({"error": "not found"}, status=404)
         except Exception as exc:

@@ -15,6 +15,7 @@ from codex_mate.api_adapter import ApiAdapter, UnavailableApiAdapter
 from codex_mate.backup_store import BackupStore
 from codex_mate.cdp import inject_file, list_targets
 from codex_mate.helper_server import HelperServer
+from codex_mate.markdown_export import MarkdownExportService
 from codex_mate.models import DeleteResult, DeleteStatus, SessionRef
 from codex_mate.storage_adapter import SQLiteStorageAdapter
 from codex_mate import __version__, runtime, updater
@@ -24,6 +25,7 @@ class ApiFirstDeleteService:
     def __init__(self, api_adapter: ApiAdapter, db_path: Path | None, backup_dir: Path):
         self.api_adapter = api_adapter
         self.local_adapter = SQLiteStorageAdapter(db_path, BackupStore(backup_dir)) if db_path else None
+        self.markdown_exporter = MarkdownExportService(db_path)
         self._update_lock = threading.Lock()
 
     def delete(self, session: SessionRef) -> DeleteResult:
@@ -130,18 +132,11 @@ class ApiFirstDeleteService:
         finally:
             self._update_lock.release()
 
-    def workspace_first_file(self) -> dict[str, object]:
-        try:
-            files = [entry for entry in Path.cwd().iterdir() if entry.is_file()]
-        except OSError as exc:
-            return {"status": "failed", "name": "", "message": str(exc)}
-        files = sorted(
-            files,
-            key=lambda entry: (entry.name.startswith("."), entry.name.lower()),
-        )
-        if not files:
-            return {"status": "not_found", "name": "", "message": "当前目录没有可搜索的文件"}
-        return {"status": "ok", "name": files[0].name}
+    def export_markdown(self, session: SessionRef) -> dict[str, object]:
+        return self.markdown_exporter.export(session).to_dict()
+
+    def backend_status(self) -> dict[str, object]:
+        return {"status": "ok", "message": "后端已连接", "version": __version__}
 
     def _release_payload(self, status: str, release: updater.Release, message: str, *, can_update: bool) -> dict[str, object]:
         return {
@@ -531,6 +526,9 @@ def handle_bridge_request(service: ApiFirstDeleteService, path: str, payload: di
         return service.check_update()
     if path == "/update":
         return service.update()
-    if path == "/workspace/first-file":
-        return service.workspace_first_file()
+    if path == "/export-markdown":
+        session = SessionRef(session_id=str(payload.get("session_id", "")), title=str(payload.get("title", "")))
+        return service.export_markdown(session)
+    if path == "/backend/status":
+        return service.backend_status()
     return {"status": DeleteStatus.FAILED.value, "session_id": str(payload.get("session_id", "")), "message": "Unknown bridge path"}

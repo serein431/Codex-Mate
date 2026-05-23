@@ -181,28 +181,28 @@ def test_bridge_routes_update_requests(tmp_path):
     assert launcher.handle_bridge_request(Service(), "/update", {}) == {"status": "updated"}
 
 
-def test_bridge_routes_workspace_first_file(tmp_path):
+def test_bridge_routes_export_and_backend_status(tmp_path):
     class Service:
-        def workspace_first_file(self):
-            return {"status": "ok", "name": "README.md"}
+        def export_markdown(self, session):
+            return {"status": "exported", "session_id": session.session_id}
 
-    assert launcher.handle_bridge_request(Service(), "/workspace/first-file", {}) == {"status": "ok", "name": "README.md"}
+        def backend_status(self):
+            return {"status": "ok"}
+
+    exported = launcher.handle_bridge_request(Service(), "/export-markdown", {"session_id": "s1", "title": "First"})
+    status = launcher.handle_bridge_request(Service(), "/backend/status", {})
+
+    assert exported == {"status": "exported", "session_id": "s1"}
+    assert status == {"status": "ok"}
 
 
-def test_update_service_reports_first_workspace_file(monkeypatch, tmp_path):
-    (tmp_path / ".env").write_text("SECRET=1\n", encoding="utf-8")
-    first = tmp_path / "b.py"
-    first.write_text("print('b')\n", encoding="utf-8")
-    (tmp_path / "a_dir").mkdir()
-    (tmp_path / "a_dir" / "nested.py").write_text("print('nested')\n", encoding="utf-8")
-    second = tmp_path / "a.py"
-    second.write_text("print('a')\n", encoding="utf-8")
-    monkeypatch.chdir(tmp_path)
+def test_update_service_reports_backend_status(tmp_path):
     service = launcher.ApiFirstDeleteService(launcher.UnavailableApiAdapter(), None, tmp_path / "backups")
 
-    result = service.workspace_first_file()
+    result = service.backend_status()
 
-    assert result == {"status": "ok", "name": "a.py"}
+    assert result["status"] == "ok"
+    assert result["version"] == launcher.__version__
 
 
 def test_bridge_rejects_removed_file_tree_requests(tmp_path):

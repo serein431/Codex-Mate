@@ -1,16 +1,45 @@
 (() => {
   const helperBase = window.__CODEX_MATE_HELPER__ || "http://127.0.0.1:57321";
   const buttonClass = "codex-delete-button";
+  const exportButtonClass = "codex-export-button";
+  const actionButtonClass = "codex-session-action-button";
+  const actionGroupClass = "codex-session-actions";
+  const actionTooltipClass = "codex-session-action-tooltip";
+  const timelineClass = "codex-conversation-timeline";
+  const timelineTrackClass = "codex-conversation-timeline-track";
+  const timelineMarkerClass = "codex-conversation-timeline-marker";
+  const timelineTooltipClass = "codex-conversation-timeline-tooltip";
+  const timelineTargetClass = "codex-conversation-timeline-target";
+  const timelineQuestionLimit = 40;
+  const timelineMinTopPercent = 2;
+  const timelineMaxTopPercent = 98;
+  const timelineMaxMarkerGapPercent = 3.5;
   const styleId = "codex-delete-style";
-  const codexDeleteStyleVersion = "9";
+  const codexDeleteStyleVersion = "10";
   const codexMateMenuId = "codex-mate-menu";
-  const codexDeleteVersion = "5";
+  const codexDeleteVersion = "6";
+  const codexExportVersion = "1";
+  const codexActionGroupVersion = "1";
   const codexArchiveDeleteAllVersion = "2";
   const codexMateVersion = window.__CODEX_MATE_VERSION__ || "dev";
   const codexMateSettingsKey = "codexMateSettings";
-  const codexMateMenuVersion = "22";
-  const codexMateTriggerInstalled = "22";
-  const codexMateFileButtonVersion = "22";
+  const codexMateMenuVersion = "23";
+  const codexMateTriggerInstalled = "23";
+  const codexConversationTimelineVersion = "1";
+  const codexThreadScrollVersion = "1";
+  const codexThreadScrollKey = "codexMateThreadScroll";
+  const codexThreadScrollMaxEntries = 120;
+  const codexThreadScrollSaveThrottleMs = 120;
+  const codexThreadScrollRestoreDelaysMs = [0, 80, 220, 500, 1000, 1800];
+  const codexThreadScrollUserIntentWindowMs = 1200;
+  const codexThreadScrollListenerVersion = "1";
+  const codexThreadScrollRouteHooksVersion = "1";
+  const codexThreadScrollUserIntentVersion = "1";
+  clearTimeout(window.__codexMateThreadScrollSaveTimer);
+  window.__codexMateThreadScrollSaveTimer = null;
+  (window.__codexMateThreadScrollRestoreTimers || []).forEach((timer) => clearTimeout(timer));
+  window.__codexMateThreadScrollRestoreTimers = [];
+  window.__codexConversationTimelineNodeCounter = window.__codexConversationTimelineNodeCounter || 0;
 
   function closestElement(target, selector) {
     const element = target?.nodeType === 1 ? target : target?.parentElement;
@@ -25,46 +54,71 @@
     style.id = styleId;
     style.dataset.codexDeleteStyleVersion = codexDeleteStyleVersion;
     style.textContent = `
-      .${buttonClass} {
+      .${actionGroupClass} {
         position: absolute;
-        right: 28px;
+        right: var(--codex-session-actions-right, 28px);
         top: 50%;
         transform: translateY(-50%);
         z-index: 20;
+        opacity: 0;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        background: transparent;
+        transition: opacity .12s ease;
+        -webkit-app-region: no-drag;
+      }
+      .${actionButtonClass} {
+        width: 26px;
+        height: 26px;
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        min-width: 38px;
-        height: 22px;
-        opacity: 0;
-        border: 1px solid rgba(148, 163, 184, .28);
+        border: 0;
         border-radius: 6px;
-        background: rgba(248, 250, 252, .74);
-        color: #64748b;
-        font: inherit;
-        font-size: 12px;
-        font-weight: 500;
-        line-height: 18px;
+        background: transparent;
+        color: #d1d5db;
+        font: 14px/1 system-ui, sans-serif;
         letter-spacing: 0;
-        padding: 0 8px;
-        cursor: pointer;
-        box-shadow: none;
-        transition: opacity .12s ease, color .12s ease, background .12s ease, border-color .12s ease;
+        padding: 0;
+        cursor: default;
+        text-align: center;
+        pointer-events: auto;
         -webkit-app-region: no-drag;
       }
-      .${buttonClass}:hover,
-      .${buttonClass}:focus-visible {
-        border-color: rgba(220, 38, 38, .42);
-        background: rgba(254, 242, 242, .96);
-        color: #dc2626;
-        opacity: 1;
+      .${actionButtonClass} svg {
+        display: block;
+        width: 16px;
+        height: 16px;
       }
-      .${buttonClass}:focus-visible {
-        outline: 2px solid rgba(220, 38, 38, .28);
-        outline-offset: 2px;
+      .${actionButtonClass}:hover,
+      .${actionButtonClass}:focus-visible {
+        background: rgba(127, 127, 127, .16);
+        color: #f4f4f5;
+        outline: none;
       }
-      [data-codex-delete-row="true"]:hover .${buttonClass} { opacity: 1; }
-      [data-codex-delete-row="true"].codex-archive-confirm-visible .${buttonClass} { right: 66px; }
+      [data-codex-delete-row="true"]:hover .${actionGroupClass} { opacity: 1; }
+      [data-codex-delete-row="true"]:hover [data-thread-title] {
+        -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - var(--codex-session-title-mask, 86px)), transparent calc(100% - max(0px, var(--codex-session-title-mask, 86px) - 6px)));
+        mask-image: linear-gradient(90deg, #000 calc(100% - var(--codex-session-title-mask, 86px)), transparent calc(100% - max(0px, var(--codex-session-title-mask, 86px) - 6px)));
+      }
+      [data-codex-delete-row="true"].codex-archive-confirm-visible .${actionGroupClass} {
+        right: max(66px, var(--codex-session-actions-right, 28px));
+      }
+      .${actionTooltipClass} {
+        position: fixed;
+        z-index: 2147483201;
+        max-width: min(220px, calc(100vw - 32px));
+        border: 1px solid rgba(255,255,255,.1);
+        border-radius: 12px;
+        background: #242628;
+        color: #f4f4f5;
+        font: 14px/20px system-ui, sans-serif;
+        padding: 9px 12px;
+        box-shadow: 0 14px 40px rgba(0,0,0,.28);
+        pointer-events: none;
+        white-space: nowrap;
+      }
       .codex-archive-delete-all {
         border: 1px solid #ef4444;
         border-radius: 7px;
@@ -74,6 +128,12 @@
         line-height: 16px;
         padding: 3px 8px;
         cursor: pointer;
+      }
+      .codex-archive-export {
+        border-color: #93c5fd;
+        background: #dbeafe;
+        color: #1d4ed8;
+        margin-left: 6px;
       }
       .codex-archive-action-bar {
         position: fixed;
@@ -197,14 +257,6 @@
       .codex-mate-trigger[data-codex-mate-compact="true"] {
         letter-spacing: 0;
       }
-      .codex-mate-file-button {
-        flex: 0 0 auto;
-      }
-      .codex-mate-file-button svg {
-        width: 17px;
-        height: 17px;
-        flex: 0 0 auto;
-      }
       .codex-mate-modal-overlay {
         position: fixed;
         inset: 0;
@@ -294,12 +346,105 @@
         opacity: .5;
         cursor: default;
       }
+      .codex-mate-backend-indicator {
+        width: 9px;
+        height: 9px;
+        border-radius: 999px;
+        background: #a1a1aa;
+        display: inline-block;
+        margin-right: 8px;
+      }
+      .codex-mate-backend-indicator[data-status="ok"] {
+        background: #34d399;
+        box-shadow: 0 0 8px rgba(52,211,153,.75);
+      }
+      .codex-mate-backend-indicator[data-status="failed"] {
+        background: #ef4444;
+        box-shadow: 0 0 8px rgba(239,68,68,.75);
+      }
+      .codex-mate-backend-indicator[data-status="checking"] { background: #fbbf24; }
+      .codex-mate-backend-label { color: #a1a1aa; font-size: 12px; }
+      .codex-mate-backend-label[data-status="ok"] { color: #34d399; }
+      .codex-mate-backend-label[data-status="failed"] { color: #f87171; }
+      .${timelineClass} {
+        position: fixed;
+        top: calc(72px + 12px);
+        right: 12px;
+        bottom: calc(28px + 12px);
+        width: 24px;
+        z-index: 2147482500;
+        pointer-events: none;
+      }
+      .${timelineTrackClass} {
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        left: 50%;
+        width: 2px;
+        transform: translateX(-50%);
+        border-radius: 999px;
+        background: rgba(209, 213, 219, .55);
+      }
+      .${timelineMarkerClass} {
+        position: absolute;
+        left: 50%;
+        width: 12px;
+        height: 12px;
+        border: 0;
+        border-radius: 999px;
+        transform: translate(-50%, -50%);
+        background: #d1d5db;
+        cursor: pointer;
+        pointer-events: auto;
+        box-shadow: 0 0 0 2px rgba(255,255,255,.92);
+      }
+      .${timelineMarkerClass}:hover,
+      .${timelineMarkerClass}:focus-visible,
+      .${timelineMarkerClass}.codex-conversation-timeline-marker-active {
+        background: #8b8b8b;
+        outline: none;
+      }
+      .${timelineTooltipClass} {
+        position: absolute;
+        top: 50%;
+        right: 18px;
+        transform: translateY(-50%);
+        max-width: min(280px, calc(100vw - 72px));
+        border: 1px solid rgba(255,255,255,.12);
+        border-radius: 10px;
+        background: #242628;
+        color: #f4f4f5;
+        font: 12px/16px system-ui, sans-serif;
+        padding: 7px 9px;
+        box-shadow: 0 14px 40px rgba(0,0,0,.28);
+        opacity: 0;
+        pointer-events: none;
+        white-space: nowrap;
+        transition: opacity .12s ease;
+      }
+      .${timelineMarkerClass}:hover .${timelineTooltipClass},
+      .${timelineMarkerClass}:focus-visible .${timelineTooltipClass} { opacity: 1; }
+      .${timelineTargetClass} {
+        animation: codex-conversation-timeline-pulse 1.2s ease-out;
+      }
+      @keyframes codex-conversation-timeline-pulse {
+        0% { box-shadow: 0 0 0 0 rgba(16,163,127,.42); }
+        100% { box-shadow: 0 0 0 16px rgba(16,163,127,0); }
+      }
     `;
     document.documentElement.appendChild(style);
   }
 
   function defaultCodexMateSettings() {
-    return { pluginEntryUnlock: true, forcePluginInstall: true, sessionDelete: true, nativeMenuPlacement: true };
+    return {
+      pluginEntryUnlock: true,
+      forcePluginInstall: true,
+      sessionDelete: true,
+      markdownExport: true,
+      conversationTimeline: true,
+      threadScrollRestore: true,
+      nativeMenuPlacement: true,
+    };
   }
 
   function codexMateSettings() {
@@ -313,8 +458,43 @@
   function setCodexMateSetting(key, value) {
     const next = { ...codexMateSettings(), [key]: value };
     localStorage.setItem(codexMateSettingsKey, JSON.stringify(next));
+    if (key === "threadScrollRestore" && !value) {
+      clearTimeout(window.__codexMateThreadScrollSaveTimer);
+      window.__codexMateThreadScrollSaveTimer = null;
+      (window.__codexMateThreadScrollRestoreTimers || []).forEach((timer) => clearTimeout(timer));
+      window.__codexMateThreadScrollRestoreTimers = [];
+      window.__codexMateThreadScrollRuntime = null;
+    }
     renderCodexMateMenu();
     scan();
+  }
+
+  let codexMateBackendStatus = { status: "checking", message: "正在检查后端…" };
+
+  function renderBackendStatus() {
+    const status = codexMateBackendStatus.status || "failed";
+    document.querySelectorAll("[data-codex-mate-backend-status]").forEach((node) => {
+      node.dataset.status = status;
+      node.textContent = codexMateBackendStatus.message || (status === "ok" ? "后端已连接" : "未连接");
+    });
+    document.querySelectorAll("[data-codex-mate-backend-indicator]").forEach((node) => {
+      node.dataset.status = status;
+      node.setAttribute("title", status === "ok" ? "后端已连接" : status === "checking" ? "正在检查后端" : "未连接");
+    });
+  }
+
+  async function checkBackendStatus() {
+    codexMateBackendStatus = { status: "checking", message: "正在检查后端…" };
+    renderBackendStatus();
+    try {
+      const result = await withTimeout(postJson("/backend/status", {}), 2500, "后端检查超时");
+      codexMateBackendStatus = result?.status === "ok"
+        ? { status: "ok", message: result.message || "后端已连接" }
+        : { status: "failed", message: result?.message || "未连接" };
+    } catch (error) {
+      codexMateBackendStatus = { status: "failed", message: bridgeErrorMessage(error, "未连接") };
+    }
+    renderBackendStatus();
   }
 
   function updateStatusText(payload, fallback) {
@@ -397,7 +577,7 @@
     overlay.innerHTML = `
       <div class="codex-mate-modal-content" role="dialog" aria-modal="true" aria-label="Codex Mate">
         <div class="codex-mate-modal-header">
-          <div class="codex-mate-modal-title">Codex Mate ${codexMateVersion}</div>
+          <div class="codex-mate-modal-title"><span class="codex-mate-backend-indicator" data-codex-mate-backend-indicator="true" data-status="checking"></span>Codex Mate ${codexMateVersion}</div>
           <button type="button" class="codex-mate-modal-close" aria-label="关闭">×</button>
         </div>
         <div class="codex-mate-modal-body">
@@ -414,8 +594,24 @@
             <button type="button" class="codex-mate-toggle" data-codex-mate-setting="sessionDelete"><span></span></button>
           </div>
           <div class="codex-mate-row">
+            <div><div class="codex-mate-row-title">Markdown 导出</div><div class="codex-mate-row-description">在会话列表悬停显示导出按钮，把本地 rollout 导出为 Markdown。</div></div>
+            <button type="button" class="codex-mate-toggle" data-codex-mate-setting="markdownExport"><span></span></button>
+          </div>
+          <div class="codex-mate-row">
+            <div><div class="codex-mate-row-title">对话时间线</div><div class="codex-mate-row-description">在右侧显示用户问题标记，点击即可跳到对应位置。</div></div>
+            <button type="button" class="codex-mate-toggle" data-codex-mate-setting="conversationTimeline"><span></span></button>
+          </div>
+          <div class="codex-mate-row">
+            <div><div class="codex-mate-row-title">滚动位置恢复</div><div class="codex-mate-row-description">切换会话时记住上次阅读位置。</div></div>
+            <button type="button" class="codex-mate-toggle" data-codex-mate-setting="threadScrollRestore"><span></span></button>
+          </div>
+          <div class="codex-mate-row">
             <div><div class="codex-mate-row-title">原生菜单栏位置</div><div class="codex-mate-row-description">把 Codex Mate 菜单插入顶部原生菜单栏；默认关闭以避免页面重渲染冲突。</div></div>
             <button type="button" class="codex-mate-toggle" data-codex-mate-setting="nativeMenuPlacement"><span></span></button>
+          </div>
+          <div class="codex-mate-row">
+            <div><div class="codex-mate-row-title">后端连接</div><div class="codex-mate-backend-label" data-codex-mate-backend-status="true" data-status="checking">正在检查后端…</div></div>
+            <button type="button" class="codex-mate-action-button" data-codex-mate-check-backend="true">刷新</button>
           </div>
           <div class="codex-mate-row">
             <div><div class="codex-mate-row-title">检查更新</div><div class="codex-mate-row-description" data-codex-mate-update-status="true">点击检查更新。</div></div>
@@ -455,6 +651,11 @@
         runCodexMateUpdate(runUpdateButton);
         return;
       }
+      const checkBackendButton = closestElement(event.target, "[data-codex-mate-check-backend]");
+      if (checkBackendButton) {
+        void checkBackendStatus();
+        return;
+      }
       const toggle = closestElement(event.target, "[data-codex-mate-setting]");
       if (!toggle) return;
       const key = toggle.getAttribute("data-codex-mate-setting");
@@ -462,6 +663,8 @@
     }, true);
     document.body.appendChild(overlay);
     renderCodexMateMenu();
+    renderBackendStatus();
+    void checkBackendStatus();
   }
 
   function findNativeMenuInsertionPoint() {
@@ -525,114 +728,6 @@
     }, true);
   }
 
-  function nativeFilePanelVisible() {
-    return Array.from(document.querySelectorAll("input, [role='searchbox']")).some((element) => {
-      const label = [
-        element.getAttribute("placeholder"),
-        element.getAttribute("aria-label"),
-        element.textContent,
-      ].filter(Boolean).join(" ");
-      return /筛选文件|Filter files/i.test(label) && !isInsideReviewPanel(element);
-    });
-  }
-
-  function isInsideReviewPanel(element) {
-    const panel = element?.closest?.("[role='tabpanel']");
-    const label = [
-      panel?.getAttribute?.("aria-label"),
-      panel?.textContent,
-    ].filter(Boolean).join(" ");
-    return /审查|Review/i.test(label) || !!element?.closest?.(".codex-review-diff-card");
-  }
-
-  function visibleButtonCandidates() {
-    return Array.from(document.querySelectorAll("button, [role='button']")).filter((button) => {
-      if (button.closest(`#${codexMateMenuId}`)) return false;
-      if (button.disabled || button.getAttribute("aria-disabled") === "true") return false;
-      const rect = button.getBoundingClientRect?.();
-      if (!rect || rect.width <= 0 || rect.height <= 0) return false;
-      if (rect.bottom < 0 || rect.top > window.innerHeight || rect.right < 0 || rect.left > window.innerWidth) return false;
-      const style = window.getComputedStyle?.(button);
-      return style?.visibility !== "hidden" && style?.display !== "none";
-    });
-  }
-
-  function buttonAccessibleText(button) {
-    return [
-      button.getAttribute("aria-label"),
-      button.getAttribute("title"),
-      button.getAttribute("data-testid"),
-      button.textContent,
-    ].filter(Boolean).join(" ");
-  }
-
-  function likelyTopRightToolbarButton(button) {
-    const rect = button.getBoundingClientRect?.();
-    if (!rect) return false;
-    return rect.top >= 40
-      && rect.top < 190
-      && rect.left > Math.max(window.innerWidth * 0.62, window.innerWidth - 260);
-  }
-
-  function isUnsafeNativeFilePanelButton(button) {
-    const label = buttonAccessibleText(button).trim();
-    if (isInsideReviewPanel(button)) return true;
-    if (/在编辑器中打开|Open in editor|Cursor|VS Code|打开文件|Open file/i.test(label)) return true;
-    if (/^(打开|Open)$/i.test(label)) return true;
-    const rect = button.getBoundingClientRect?.();
-    return !!rect && rect.top < 40;
-  }
-
-  function looksLikeFolderButton(button) {
-    const svgText = Array.from(button.querySelectorAll("path"))
-      .map((path) => path.getAttribute("d") || "")
-      .join(" ");
-    return /M6\.584|H3\.38184V12\.7002|folder/i.test(svgText + " " + button.innerHTML);
-  }
-
-  function looksLikeNativeFileTreeToolbarButton(button) {
-    const rect = button.getBoundingClientRect?.();
-    if (!rect) return false;
-    return rect.top >= 40
-      && rect.top <= 100
-      && rect.left > Math.max(window.innerWidth * 0.72, window.innerWidth - 120)
-      && /\bms-auto\b/.test(button.className?.toString() || "");
-  }
-
-  function findNativeFilePanelButton() {
-    const labelPattern = /文件列表|文件面板|项目文件|Files|File list|Show files|Browse files/i;
-    const candidates = visibleButtonCandidates()
-      .filter(likelyTopRightToolbarButton)
-      .filter((button) => !isUnsafeNativeFilePanelButton(button));
-    const toolbarCandidates = candidates.filter(looksLikeNativeFileTreeToolbarButton);
-    return candidates.find((button) => labelPattern.test(buttonAccessibleText(button)))
-      || toolbarCandidates.find(looksLikeFolderButton)
-      || toolbarCandidates[0]
-      || null;
-  }
-
-  function findNativeReviewFileButton() {
-    const labelPattern = /在审查中显示文件|审查中显示文件|Show file in review|Show in review/i;
-    return visibleButtonCandidates()
-      .filter((button) => labelPattern.test(buttonAccessibleText(button)))
-      .sort((left, right) => Math.abs(left.getBoundingClientRect().top - 96) - Math.abs(right.getBoundingClientRect().top - 96))[0]
-      || null;
-  }
-
-  function delay(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
-  async function waitForElement(predicate, timeoutMs = 2200, intervalMs = 80) {
-    const deadline = Date.now() + timeoutMs;
-    let found = predicate();
-    while (!found && Date.now() < deadline) {
-      await delay(intervalMs);
-      found = predicate();
-    }
-    return found || null;
-  }
-
   function visibleElements(selector) {
     return Array.from(document.querySelectorAll(selector)).filter((element) => {
       const rect = element.getBoundingClientRect?.();
@@ -641,154 +736,6 @@
       const style = window.getComputedStyle?.(element);
       return style?.visibility !== "hidden" && style?.display !== "none";
     });
-  }
-
-  function nativeFileSearchInput() {
-    return visibleElements("input, [role='textbox']").find((element) => {
-      const label = [
-        element.getAttribute("placeholder"),
-        element.getAttribute("aria-label"),
-        element.textContent,
-      ].filter(Boolean).join(" ");
-      return /搜索文件|Search files/i.test(label);
-    }) || null;
-  }
-
-  function fileSearchTermVariants(name) {
-    const cleaned = String(name || "").trim();
-    if (!cleaned) return [];
-    const variants = [cleaned];
-    const stem = cleaned.replace(/\.[^.]+$/, "");
-    if (stem && stem !== cleaned) variants.push(stem);
-    return variants;
-  }
-
-  async function nativeWorkspaceFirstFileNameTerms() {
-    try {
-      const result = await withTimeout(postJson("/workspace/first-file", {}), 1200, "读取当前目录文件超时");
-      return result?.status === "ok" ? fileSearchTermVariants(result.name) : [];
-    } catch (_) {
-      return [];
-    }
-  }
-
-  async function nativeFileSearchTerms() {
-    const terms = await nativeWorkspaceFirstFileNameTerms();
-    const filePattern = /(?:^|[\s([{"'`>])([A-Za-z0-9_.@+-]+\.[A-Za-z0-9]{1,8})(?=$|[\s)\]}"'`<,:;])/g;
-    Array.from(document.querySelectorAll("[aria-label], [title], [data-value], [role='tab'], [role='button'], button")).forEach((element) => {
-      const text = [
-        element.getAttribute?.("aria-label"),
-        element.getAttribute?.("title"),
-        element.getAttribute?.("data-value"),
-        element.textContent,
-      ].filter(Boolean).join(" ");
-      let match = filePattern.exec(text);
-      while (match) {
-        const fileName = match[1];
-        terms.push(...fileSearchTermVariants(fileName));
-        match = filePattern.exec(text);
-      }
-    });
-    terms.push(".", "pyproject", "README", "package", "AGENTS", ".gitignore", "main", "index", "src");
-    terms.push("a", "e", "i", "o", "s", "t", "n", "r");
-    return Array.from(new Set(terms.filter((term) => term.length <= 80)));
-  }
-
-  function closeNativeFileSearch(input) {
-    input?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true, cancelable: true }));
-    input?.dispatchEvent(new KeyboardEvent("keyup", { key: "Escape", code: "Escape", bubbles: true, cancelable: true }));
-    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", code: "Escape", bubbles: true, cancelable: true }));
-    document.dispatchEvent(new KeyboardEvent("keyup", { key: "Escape", code: "Escape", bubbles: true, cancelable: true }));
-  }
-
-  function closeAnyNativeFileSearch() {
-    closeNativeFileSearch(nativeFileSearchInput());
-  }
-
-  function firstNativeFileSearchResult() {
-    return visibleElements("[role='option'], [cmdk-item], [data-value]").find((element) => {
-      const value = element.getAttribute("data-value") || element.getAttribute("value") || "";
-      const text = element.textContent || "";
-      const combined = `${value} ${text}`.trim();
-      if (!combined || /^文件$|^Files$/i.test(value)) return false;
-      if (/未找到|没有结果|No results|No files|Search files|搜索文件/i.test(combined)) return false;
-      if (/输入内容搜索文件|Type to search files/i.test(combined)) return false;
-      if (element.getAttribute("aria-disabled") === "true") return false;
-      return /(^|[\s/])\.gitignore\b|[/\\]|\.[A-Za-z0-9]{1,8}\b/.test(combined) || (!!value && value !== "command-menu-first-file-item");
-    }) || null;
-  }
-
-  function setNativeInputValue(input, value) {
-    input.focus?.();
-    input.select?.();
-    const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), "value")?.set
-      || Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
-    setter?.call(input, value) ?? (input.value = value);
-    input._valueTracker?.setValue?.("");
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    input.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: value }));
-    input.dispatchEvent(new Event("change", { bubbles: true }));
-  }
-
-  function activateNativeFileSearchResult(result, input) {
-    input?.focus?.();
-    input?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true, cancelable: true }));
-    input?.dispatchEvent(new KeyboardEvent("keypress", { key: "Enter", code: "Enter", bubbles: true, cancelable: true }));
-    input?.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", code: "Enter", bubbles: true, cancelable: true }));
-    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true, cancelable: true }));
-    document.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", code: "Enter", bubbles: true, cancelable: true }));
-  }
-
-  async function openNativeWorkspaceFileTab() {
-    const searchTerms = (await nativeFileSearchTerms()).slice(0, 14);
-    const deadline = Date.now() + 6000;
-    for (const term of searchTerms) {
-      if (Date.now() > deadline) break;
-      window.postMessage({ type: "file-search-command-menu" }, "*");
-      const input = await waitForElement(nativeFileSearchInput, 1200);
-      if (!input) {
-        closeAnyNativeFileSearch();
-        continue;
-      }
-      setNativeInputValue(input, term);
-      const result = await waitForElement(firstNativeFileSearchResult, term ? 900 : 900);
-      if (!result) {
-        closeNativeFileSearch(input);
-        continue;
-      }
-      await delay(450);
-      activateNativeFileSearchResult(result, input);
-      if (await waitForElement(nativeFilePanelVisible, 1800)) return true;
-      if (await waitForElement(findNativeFilePanelButton, 2200)) return true;
-      closeNativeFileSearch(input);
-    }
-    closeAnyNativeFileSearch();
-    return false;
-  }
-
-  async function openNativeFilePanel() {
-    if (nativeFilePanelVisible()) return true;
-    const button = findNativeFilePanelButton();
-    if (button) {
-      button.click();
-      return !!(await waitForElement(nativeFilePanelVisible, 1200));
-    }
-    const openedFile = await openNativeWorkspaceFileTab();
-    if (!openedFile) {
-      closeAnyNativeFileSearch();
-      showToast("没有找到可打开的原生文件入口", null);
-      return false;
-    }
-    if (await waitForElement(nativeFilePanelVisible, 500)) return true;
-    const nativeButton = await waitForElement(findNativeFilePanelButton, 1600);
-    if (!nativeButton) {
-      showToast("已打开原生文件页，但未找到文件树按钮", null);
-      return false;
-    }
-    nativeButton.click();
-    if (await waitForElement(nativeFilePanelVisible, 1200)) return true;
-    showToast("原生文件树没有响应", null);
-    return false;
   }
 
   function visibleRightPanelLeft() {
@@ -851,41 +798,6 @@
     }
   }
 
-  function configureCodexMateFileButton(menu, nativeButtonClass) {
-    menu.querySelectorAll('[data-codex-mate-open-files="true"]').forEach((button, index) => {
-      if (index > 0 || button.dataset.codexMateFileButtonVersion !== codexMateFileButtonVersion) button.remove();
-    });
-    let button = menu.querySelector('[data-codex-mate-open-files="true"]');
-    if (!button) {
-      button = document.createElement("button");
-      button.type = "button";
-      button.className = "codex-mate-toolbar-button codex-mate-file-button";
-      button.setAttribute("aria-label", "文件列表");
-      button.setAttribute("title", "文件列表");
-      button.dataset.codexMateOpenFiles = "true";
-      button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h4l2 2h7A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5z"></path></svg>';
-      menu.appendChild(button);
-    }
-    button.className = "codex-mate-toolbar-button codex-mate-file-button";
-    button.dataset.codexMateFileButtonVersion = codexMateFileButtonVersion;
-    if (button.dataset.codexMateFileButtonInstalled === codexMateFileButtonVersion) return;
-    button.dataset.codexMateFileButtonInstalled = codexMateFileButtonVersion;
-    ["pointerdown", "mousedown", "mouseup", "touchstart"].forEach((eventName) => {
-      button.addEventListener(eventName, (event) => {
-        event.stopPropagation();
-        event.stopImmediatePropagation?.();
-      }, true);
-    });
-    button.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation?.();
-      void openNativeFilePanel().finally(() => {
-        setTimeout(installCodexMateMenu, 100);
-      });
-    }, true);
-  }
-
   function installCodexMateMenu() {
     const existing = document.getElementById(codexMateMenuId);
     removeDuplicateCodexMateMenus(existing);
@@ -895,7 +807,6 @@
       insertionPoint = findNativeMenuInsertionPoint();
     } else if (existing && existing.isConnected) {
       configureCodexMateTrigger(existing, existing.querySelector("button"), insertionPoint?.nativeButtonClass || "");
-      configureCodexMateFileButton(existing, insertionPoint?.nativeButtonClass || "");
       placeCodexMateMenu(existing, insertionPoint);
       removeDuplicateCodexMateMenus(existing);
       return;
@@ -915,7 +826,6 @@
     const nativeButtonClass = insertionPoint?.nativeButtonClass || "codex-mate-trigger";
     configureCodexMateTrigger(menu, trigger, nativeButtonClass);
     menu.appendChild(trigger);
-    configureCodexMateFileButton(menu, insertionPoint?.nativeButtonClass || "");
     placeCodexMateMenu(menu, insertionPoint);
     removeDuplicateCodexMateMenus(menu);
   }
@@ -1078,9 +988,48 @@
 
   async function postJson(path, payload) {
     if (!window.__codexMateBridge) {
+      if (path === "/backend/status") {
+        try {
+          const response = await fetch(`${helperBase}${path}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload || {}),
+          });
+          return await response.json();
+        } catch (_) {
+          return { status: "failed", message: "未连接" };
+        }
+      }
       return { status: "failed", message: "Codex Mate 桥接不可用，请重启启动器" };
     }
     return await window.__codexMateBridge(path, payload);
+  }
+
+  function downloadMarkdown(filename, markdown) {
+    if (!filename || typeof markdown !== "string") throw new Error("导出结果不完整");
+    const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  async function exportMarkdown(ref) {
+    try {
+      const result = await postJson("/export-markdown", ref);
+      if (result.status === "exported" && result.filename && typeof result.markdown === "string") {
+        downloadMarkdown(result.filename, result.markdown);
+        showToast(result.message || "导出成功", null);
+        return;
+      }
+      showToast(result.message || "导出失败", null);
+    } catch (error) {
+      showToast(`导出失败：${error?.message || error}`, null);
+    }
   }
 
   function showToast(message, undoToken) {
@@ -1190,7 +1139,7 @@
         const rect = button.getBoundingClientRect();
         const label = button.getAttribute("aria-label") || "";
         const text = (button.textContent || "").trim();
-        if (button.classList.contains(buttonClass) || label === "归档对话" || label === "置顶对话") return false;
+        if (button.closest(`.${actionGroupClass}`) || label === "归档对话" || label === "置顶对话") return false;
         return text === "确认" || (text.length > 0 && rect.width > 0 && rect.width <= 36 && rect.x > row.getBoundingClientRect().right - 50);
       });
       row.classList.toggle("codex-archive-confirm-visible", hasArchiveConfirm);
@@ -1231,46 +1180,188 @@
     document.addEventListener("click", handler, true);
   }
 
+  function actionGroupFromRow(row) {
+    return row.querySelector(`.${actionGroupClass}`);
+  }
+
+  function nativeActionButtonsFromRow(row) {
+    return [...row.querySelectorAll('button,[role="button"],a')]
+      .filter((node) => !node.closest(`.${actionGroupClass}`))
+      .filter((node) => {
+        const rect = node.getBoundingClientRect();
+        if (rect.width < 12 || rect.height < 12) return false;
+        const label = [
+          node.getAttribute("aria-label"),
+          node.getAttribute("title"),
+          node.dataset?.state,
+          node.textContent,
+        ].filter(Boolean).join(" ");
+        if (/(pin|archive|置顶|归档)/i.test(label)) return true;
+        const rowRect = row.getBoundingClientRect();
+        return rect.left > rowRect.left + rowRect.width * 0.68;
+      });
+  }
+
+  function syncActionGroupLayout(row, group) {
+    if (!row || !group) return;
+    const rowRect = row.getBoundingClientRect();
+    const leftmostNative = nativeActionButtonsFromRow(row)
+      .map((button) => button.getBoundingClientRect())
+      .filter((rect) => rect.width > 0 && rect.height > 0)
+      .sort((left, right) => left.left - right.left)[0];
+    const gap = 8;
+    const fallbackRight = 28;
+    const right = leftmostNative ? Math.max(fallbackRight, Math.round(rowRect.right - leftmostNative.left + gap)) : fallbackRight;
+    const groupWidth = Math.ceil(group.getBoundingClientRect().width || 58);
+    group.style.setProperty("--codex-session-actions-right", `${right}px`);
+    row.style.setProperty("--codex-session-title-mask", `${right + groupWidth + 12}px`);
+  }
+
+  function syncActionGroupsLayout() {
+    sessionRows().forEach((row) => {
+      const group = actionGroupFromRow(row);
+      if (group) syncActionGroupLayout(row, group);
+    });
+  }
+
+  function removeActionGroups(row) {
+    row.querySelectorAll(`.${actionGroupClass}`).forEach((group) => group.remove());
+  }
+
+  function stopActionButtonEvent(row, button, event) {
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation?.();
+    releaseDeleteFocus(row, button);
+  }
+
+  function hideActionButtonTooltip() {
+    document.querySelectorAll(`.${actionTooltipClass}`).forEach((node) => node.remove());
+  }
+
+  function showActionButtonTooltip(button) {
+    const label = button.dataset.codexActionLabel || button.getAttribute("aria-label") || "";
+    if (!label) return;
+    hideActionButtonTooltip();
+    const tooltip = document.createElement("div");
+    tooltip.className = actionTooltipClass;
+    tooltip.textContent = label;
+    document.body.appendChild(tooltip);
+    const buttonRect = button.getBoundingClientRect();
+    const tooltipRect = tooltip.getBoundingClientRect();
+    const left = Math.min(
+      window.innerWidth - tooltipRect.width - 8,
+      Math.max(8, buttonRect.left + buttonRect.width / 2 - tooltipRect.width / 2),
+    );
+    const top = Math.min(window.innerHeight - tooltipRect.height - 8, buttonRect.bottom + 8);
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${Math.max(8, top)}px`;
+  }
+
+  function installActionButtonEvents(row, button, onActivate) {
+    ["pointerdown", "mousedown", "mouseup", "touchstart"].forEach((eventName) => {
+      button.addEventListener(eventName, (event) => stopActionButtonEvent(row, button, event), true);
+    });
+    button.addEventListener("pointerenter", () => showActionButtonTooltip(button));
+    button.addEventListener("pointerleave", hideActionButtonTooltip);
+    button.addEventListener("focus", () => showActionButtonTooltip(button));
+    button.addEventListener("blur", hideActionButtonTooltip);
+    button.addEventListener("pointerup", onActivate, true);
+    button.addEventListener("click", (event) => {
+      hideActionButtonTooltip();
+      onActivate(event);
+    }, true);
+  }
+
+  function refreshActionButton(originalButton, row, onActivate) {
+    if (!originalButton.isConnected) return;
+    const replacement = originalButton.cloneNode(true);
+    installActionButtonEvents(row, replacement, onActivate);
+    originalButton.replaceWith(replacement);
+  }
+
+  function configureActionButton(button, label, icon) {
+    button.setAttribute("aria-label", label);
+    button.dataset.codexActionLabel = label;
+    button.removeAttribute("title");
+    button.textContent = icon;
+  }
+
+  function trashIconSvg() {
+    return `
+      <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 6h18"></path>
+        <path d="M8 6V4h8v2"></path>
+        <path d="M19 6l-1 14H6L5 6"></path>
+        <path d="M10 11v5"></path>
+        <path d="M14 11v5"></path>
+      </svg>
+    `;
+  }
+
+  function configureSvgActionButton(button, label, svg) {
+    button.setAttribute("aria-label", label);
+    button.dataset.codexActionLabel = label;
+    button.removeAttribute("title");
+    button.innerHTML = svg;
+  }
+
   function attachButton(row) {
-    if (!codexMateSettings().sessionDelete) return;
-    const existingDeleteButtons = Array.from(row.querySelectorAll(`.${buttonClass}`));
-    if (existingDeleteButtons.length === 1 && existingDeleteButtons[0].dataset.codexDeleteVersion === codexDeleteVersion) return;
-    existingDeleteButtons.forEach((button) => button.remove());
+    const settings = codexMateSettings();
+    if (!settings.sessionDelete && !settings.markdownExport) {
+      removeActionGroups(row);
+      row.dataset.codexDeleteRow = "false";
+      return;
+    }
+    const existingGroup = actionGroupFromRow(row);
+    const existingDeleteButton = existingGroup?.querySelector(`.${buttonClass}`);
+    const existingExportButton = existingGroup?.querySelector(`.${exportButtonClass}`);
+    const groupReady = existingGroup?.dataset.codexActionGroupVersion === codexActionGroupVersion;
+    const deleteReady = !settings.sessionDelete || existingDeleteButton?.dataset.codexDeleteVersion === codexDeleteVersion;
+    const exportReady = !settings.markdownExport || existingExportButton?.dataset.codexExportVersion === codexExportVersion;
+    const missingDelete = settings.sessionDelete && !existingDeleteButton;
+    const missingExport = settings.markdownExport && !existingExportButton;
+    const unexpectedDelete = !settings.sessionDelete && !!existingDeleteButton;
+    const unexpectedExport = !settings.markdownExport && !!existingExportButton;
+    if (groupReady && deleteReady && exportReady && !missingDelete && !missingExport && !unexpectedDelete && !unexpectedExport) {
+      syncActionGroupLayout(row, existingGroup);
+      return;
+    }
+    removeActionGroups(row);
     row.dataset.codexDeleteRow = "false";
     const ref = sessionRefFromRow(row);
     if (!ref.session_id) return;
     row.dataset.codexDeleteRow = "true";
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = buttonClass;
-    button.dataset.codexDeleteVersion = codexDeleteVersion;
-    button.setAttribute("aria-label", "删除会话");
-    button.title = "删除会话";
-    button.textContent = "删除";
-    const stopDeleteButtonEvent = (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation?.();
-      releaseDeleteFocus(row, button);
-    };
-    ["pointerdown", "mousedown", "mouseup", "touchstart"].forEach((eventName) => {
-      button.addEventListener(eventName, stopDeleteButtonEvent, true);
-    });
-    const openDeleteConfirm = (event) => openDeleteConfirmForRow(row, button, ref, event);
-    button.addEventListener("pointerup", openDeleteConfirm, true);
-    button.addEventListener("click", openDeleteConfirm, true);
-    row.appendChild(button);
-    const refreshDeleteButton = (originalButton) => {
-      if (!originalButton.isConnected) return;
-      const replacement = originalButton.cloneNode(true);
-      ["pointerdown", "mousedown", "mouseup", "touchstart"].forEach((eventName) => {
-        replacement.addEventListener(eventName, stopDeleteButtonEvent, true);
-      });
-      replacement.addEventListener("pointerup", openDeleteConfirm, true);
-      replacement.addEventListener("click", openDeleteConfirm, true);
-      originalButton.replaceWith(replacement);
-    };
-    setTimeout(() => refreshDeleteButton(button), 0);
+    const group = document.createElement("div");
+    group.className = actionGroupClass;
+    group.dataset.codexActionGroupVersion = codexActionGroupVersion;
+    if (settings.markdownExport) {
+      const exportButton = document.createElement("button");
+      exportButton.type = "button";
+      exportButton.className = `${actionButtonClass} ${exportButtonClass}`;
+      exportButton.dataset.codexExportVersion = codexExportVersion;
+      configureActionButton(exportButton, "导出 Markdown", "⇩");
+      const openExport = (event) => {
+        stopActionButtonEvent(row, exportButton, event);
+        void exportMarkdown(ref);
+      };
+      installActionButtonEvents(row, exportButton, openExport);
+      group.appendChild(exportButton);
+      setTimeout(() => refreshActionButton(exportButton, row, openExport), 0);
+    }
+    if (settings.sessionDelete) {
+      const deleteButton = document.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.className = `${actionButtonClass} ${buttonClass}`;
+      deleteButton.dataset.codexDeleteVersion = codexDeleteVersion;
+      configureSvgActionButton(deleteButton, "删除", trashIconSvg());
+      const openDeleteConfirm = (event) => openDeleteConfirmForRow(row, deleteButton, ref, event);
+      installActionButtonEvents(row, deleteButton, openDeleteConfirm);
+      group.appendChild(deleteButton);
+      setTimeout(() => refreshActionButton(deleteButton, row, openDeleteConfirm), 0);
+    }
+    row.appendChild(group);
+    syncActionGroupLayout(row, group);
   }
 
   function tryAttachButton(row) {
@@ -1353,37 +1444,63 @@
   }
 
   function attachArchivedPageDeleteButton(row) {
-    if (!codexMateSettings().sessionDelete) return;
+    const settings = codexMateSettings();
+    if (!settings.sessionDelete && !settings.markdownExport) return;
     if (row.dataset.codexArchiveDeleteRow === "true") return;
     row.dataset.codexArchiveDeleteRow = "true";
     const unarchiveButton = Array.from(row.querySelectorAll("button")).find((button) => (button.textContent || "").trim() === "取消归档");
     if (!unarchiveButton) return;
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = "codex-archive-delete-all";
-    button.textContent = "删除";
-    ["pointerdown", "mousedown", "mouseup", "touchstart"].forEach((eventName) => {
-      button.addEventListener(eventName, stopArchivedButtonEvent, true);
-    });
-    button.addEventListener("click", async (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      event.stopImmediatePropagation?.();
-      const ref = await resolveArchivedThread(row);
-      if (!ref.session_id) {
-        showToast("删除失败：未找到归档会话 ID", null);
-        return;
-      }
-      if (!(await confirmDelete(ref.title))) return;
-      const result = await postJson("/delete", ref);
-      if (result.status === "server_deleted" || result.status === "local_deleted") {
-        row.remove();
-        showToast(result.message || "删除成功", result.undo_token);
-      } else {
-        showToast(result.message || "删除失败", null);
-      }
-    }, true);
-    unarchiveButton.insertAdjacentElement("afterend", button);
+    let insertAfter = unarchiveButton;
+    if (settings.markdownExport) {
+      const exportButton = document.createElement("button");
+      exportButton.type = "button";
+      exportButton.className = "codex-archive-delete-all codex-archive-export";
+      exportButton.textContent = "导出";
+      ["pointerdown", "mousedown", "mouseup", "touchstart"].forEach((eventName) => {
+        exportButton.addEventListener(eventName, stopArchivedButtonEvent, true);
+      });
+      exportButton.addEventListener("click", async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation?.();
+        const ref = await resolveArchivedThread(row);
+        if (!ref.session_id) {
+          showToast("导出失败：未找到归档会话 ID", null);
+          return;
+        }
+        await exportMarkdown(ref);
+      }, true);
+      insertAfter.insertAdjacentElement("afterend", exportButton);
+      insertAfter = exportButton;
+    }
+    if (settings.sessionDelete) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "codex-archive-delete-all";
+      button.textContent = "删除";
+      ["pointerdown", "mousedown", "mouseup", "touchstart"].forEach((eventName) => {
+        button.addEventListener(eventName, stopArchivedButtonEvent, true);
+      });
+      button.addEventListener("click", async (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        event.stopImmediatePropagation?.();
+        const ref = await resolveArchivedThread(row);
+        if (!ref.session_id) {
+          showToast("删除失败：未找到归档会话 ID", null);
+          return;
+        }
+        if (!(await confirmDelete(ref.title))) return;
+        const result = await postJson("/delete", ref);
+        if (result.status === "server_deleted" || result.status === "local_deleted") {
+          row.remove();
+          showToast(result.message || "删除成功", result.undo_token);
+        } else {
+          showToast(result.message || "删除失败", null);
+        }
+      }, true);
+      insertAfter.insertAdjacentElement("afterend", button);
+    }
   }
 
   function installArchivedDeleteAllButton() {
@@ -1437,19 +1554,552 @@
     }
   }
 
+  function finiteNonNegativeNumber(value) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric >= 0 ? numeric : 0;
+  }
+
+  function finiteScrollNumber(value) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) ? numeric : 0;
+  }
+
+  function locationThreadId() {
+    const source = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    const match = source.match(/(?:session|conversation|thread)(?:\/|=|:|-)([A-Za-z0-9_.-]+)/i)
+      || source.match(/\/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})(?:[/?#]|$)/)
+      || source.match(/\/([A-Za-z0-9_-]{24,})(?:[/?#]|$)/);
+    return match ? decodeURIComponent(match[1]) : "";
+  }
+
+  function threadIdVariants(sessionId) {
+    if (typeof sessionId !== "string" || !sessionId.trim()) return [];
+    const id = sessionId.trim();
+    const bareId = id.startsWith("local:") ? id.slice("local:".length) : id;
+    return Array.from(new Set([id, bareId, `local:${bareId}`].filter(Boolean)));
+  }
+
+  function validThreadScrollSessionKey(sessionId) {
+    const variants = threadIdVariants(sessionId);
+    const bareId = variants.find((id) => !id.startsWith("local:")) || variants[0] || "";
+    if (!bareId || bareId === "__proto__" || bareId === "prototype" || bareId === "constructor") return "";
+    return /^[A-Za-z0-9_.-]{8,128}$/.test(bareId) ? bareId : "";
+  }
+
+  function currentSessionRef() {
+    const rows = sessionRows();
+    for (const row of rows) {
+      const ref = sessionRefFromRow(row);
+      if (ref.session_id && isCurrentSessionRow(row, ref)) return ref;
+    }
+    return { session_id: locationThreadId(), title: "" };
+  }
+
+  function truncateTimelineQuestion(text) {
+    const normalized = String(text || "").replace(/\s+/g, " ").trim();
+    const chars = Array.from(normalized);
+    if (chars.length <= timelineQuestionLimit) return normalized;
+    return `${chars.slice(0, timelineQuestionLimit).join("")}…`;
+  }
+
+  function conversationTimelineRoot() {
+    return document.querySelector(".thread-scroll-container") || document.querySelector("main") || document.querySelector('[role="main"]');
+  }
+
+  function timelineQuestionSelector() {
+    return [
+      '[data-message-author-role="user"]',
+      '[data-testid="conversation-turn"][data-message-author-role="user"]',
+      '[data-testid="conversation-turn"] [data-message-author-role="user"]',
+      '[class*="user-message"]',
+      '[class*="UserMessage"]',
+    ].join(", ");
+  }
+
+  function nodeOrAncestorLooksLikeCodexUserBubble(node) {
+    if (node.nodeType !== 1) return false;
+    const className = String(node.className || "");
+    if (className.includes("bg-token-foreground/5") && node.parentElement?.classList?.contains("items-end")) return true;
+    const bubble = node.closest?.("[class*='bg-token-foreground/5']");
+    return !!bubble?.parentElement?.classList?.contains("items-end");
+  }
+
+  function nodeLooksLikeCodexUserBubble(node) {
+    if (nodeOrAncestorLooksLikeCodexUserBubble(node)) return true;
+    return !!node.querySelector?.(".group.flex.w-full.flex-col.items-end.justify-end.gap-1 > [class*='bg-token-foreground/5']");
+  }
+
+  function nodeLooksLikeTimelineQuestion(node) {
+    if (node.nodeType !== 1 || isExtensionUiNode(node)) return false;
+    const questionSelector = timelineQuestionSelector();
+    return !!node.matches?.(questionSelector) || !!node.closest?.(questionSelector) || !!node.querySelector?.(questionSelector) || nodeLooksLikeCodexUserBubble(node);
+  }
+
+  function conversationTimelineQuestionCandidates(root) {
+    const explicitCandidates = Array.from(root.querySelectorAll(timelineQuestionSelector()));
+    const codexUserBubbles = Array.from(root.querySelectorAll(".group.flex.w-full.flex-col.items-end.justify-end.gap-1")).flatMap((group) => {
+      return Array.from(group.children).filter((child) => String(child.className || "").includes("bg-token-foreground/5"));
+    });
+    return [...explicitCandidates, ...codexUserBubbles];
+  }
+
+  function extractTimelineQuestionText(node) {
+    const clone = node.cloneNode(true);
+    clone.querySelectorAll("button, svg, [aria-hidden='true'], .sr-only").forEach((child) => child.remove());
+    return (clone.textContent || "").replace(/\s+/g, " ").trim();
+  }
+
+  function timelineNodeId(node) {
+    if (!node.__codexConversationTimelineNodeId) {
+      window.__codexConversationTimelineNodeCounter += 1;
+      node.__codexConversationTimelineNodeId = String(window.__codexConversationTimelineNodeCounter);
+    }
+    return node.__codexConversationTimelineNodeId;
+  }
+
+  function visibleTimelineNode(node) {
+    if (!node.isConnected) return false;
+    const style = getComputedStyle(node);
+    if (style.display === "none" || style.visibility === "hidden") return false;
+    const rect = node.getBoundingClientRect();
+    return rect.width > 0 || rect.height > 0 || !!node.textContent?.trim();
+  }
+
+  function conversationTimelineQuestions() {
+    const root = conversationTimelineRoot();
+    if (!root?.matches?.(".thread-scroll-container, main, [role='main']")) return [];
+    const seen = new Set();
+    return conversationTimelineQuestionCandidates(root).flatMap((node) => {
+      if (node.closest("[data-app-action-sidebar-thread-id]")) return [];
+      if (isExtensionUiNode(node)) return [];
+      const target = node.closest('[data-testid="conversation-turn"]') || node;
+      if (seen.has(target)) return [];
+      seen.add(target);
+      if (!visibleTimelineNode(target)) return [];
+      const text = extractTimelineQuestionText(node);
+      if (!text) return [];
+      return [{ node: target, text, nodeId: timelineNodeId(target) }];
+    });
+  }
+
+  function timelineScrollerViewportTop(scroller) {
+    if (scroller === document.scrollingElement || scroller === document.documentElement || scroller === document.body) return 0;
+    return scroller.getBoundingClientRect().top;
+  }
+
+  function timelineScrollableHeight(scroller) {
+    return Math.max(1, scroller.scrollHeight - scroller.clientHeight);
+  }
+
+  function timelineRawMarkerTop(question, scroller) {
+    const scrollOffset = scroller.scrollTop + question.node.getBoundingClientRect().top - timelineScrollerViewportTop(scroller);
+    const percent = (scrollOffset / timelineScrollableHeight(scroller)) * 100;
+    return Math.max(timelineMinTopPercent, Math.min(timelineMaxTopPercent, percent));
+  }
+
+  function timelineMarkerTops(questions, scroller) {
+    if (questions.length <= 1) return [50];
+    const minGap = Math.min(timelineMaxMarkerGapPercent, (timelineMaxTopPercent - timelineMinTopPercent) / Math.max(questions.length - 1, 1));
+    const tops = questions.map((question) => timelineRawMarkerTop(question, scroller));
+    for (let index = 1; index < tops.length; index += 1) {
+      tops[index] = Math.max(tops[index], tops[index - 1] + minGap);
+    }
+    for (let index = tops.length - 1; index >= 0; index -= 1) {
+      const maxForIndex = timelineMaxTopPercent - ((tops.length - 1 - index) * minGap);
+      tops[index] = Math.min(tops[index], maxForIndex);
+    }
+    return tops.map((top) => Math.max(timelineMinTopPercent, Math.min(timelineMaxTopPercent, top)));
+  }
+
+  function removeConversationTimeline() {
+    document.querySelectorAll(`.${timelineClass}`).forEach((node) => node.remove());
+  }
+
+  function nearestTimelineScroller(node) {
+    for (let current = node?.parentElement; current; current = current.parentElement) {
+      const style = getComputedStyle(current);
+      if (/(auto|scroll)/.test(style.overflowY) && current.scrollHeight > current.clientHeight) return current;
+    }
+    return document.querySelector(".thread-scroll-container") || document.scrollingElement || document.documentElement;
+  }
+
+  function scrollTimelineTarget(node) {
+    const scroller = nearestTimelineScroller(node);
+    const nodeRect = node.getBoundingClientRect();
+    const nextTop = scroller.scrollTop + nodeRect.top - timelineScrollerViewportTop(scroller) - (scroller.clientHeight / 2) + (nodeRect.height / 2);
+    scroller.scrollTo({ top: nextTop, behavior: "smooth" });
+  }
+
+  function highlightTimelineTarget(node) {
+    node.classList.remove(timelineTargetClass);
+    void node.offsetWidth;
+    node.classList.add(timelineTargetClass);
+    clearTimeout(node.__codexConversationTimelineHighlightTimer);
+    node.__codexConversationTimelineHighlightTimer = setTimeout(() => {
+      node.classList.remove(timelineTargetClass);
+    }, 1300);
+  }
+
+  function createConversationTimelineMarker(question) {
+    const marker = document.createElement("button");
+    marker.type = "button";
+    marker.className = timelineMarkerClass;
+    marker.style.top = `${question.markerTop}%`;
+    marker.setAttribute("aria-label", `跳转到：${truncateTimelineQuestion(question.text)}`);
+    const tooltip = document.createElement("span");
+    tooltip.className = timelineTooltipClass;
+    tooltip.id = `codex-conversation-timeline-tooltip-${question.nodeId}`;
+    tooltip.setAttribute("role", "tooltip");
+    tooltip.textContent = truncateTimelineQuestion(question.text);
+    marker.setAttribute("aria-describedby", tooltip.id);
+    marker.appendChild(tooltip);
+    const activateMarker = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation?.();
+      document.querySelectorAll(`.${timelineMarkerClass}.codex-conversation-timeline-marker-active`).forEach((node) => {
+        node.classList.remove("codex-conversation-timeline-marker-active");
+      });
+      marker.classList.add("codex-conversation-timeline-marker-active");
+      scrollTimelineTarget(question.node);
+      highlightTimelineTarget(question.node);
+    };
+    marker.addEventListener("pointerup", activateMarker, true);
+    marker.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") activateMarker(event);
+    }, true);
+    return marker;
+  }
+
+  function prepareTimelineQuestions(questions) {
+    if (questions.length === 0) return [];
+    const scroller = nearestTimelineScroller(questions[0].node);
+    const tops = timelineMarkerTops(questions, scroller);
+    return questions.map((question, index) => ({ ...question, markerTop: Number(tops[index].toFixed(3)) }));
+  }
+
+  function timelineSignature(questions) {
+    return questions.map((question) => `${question.nodeId}:${Math.round(question.markerTop * 10)}:${truncateTimelineQuestion(question.text)}`).join("|");
+  }
+
+  function refreshConversationTimeline() {
+    if (!codexMateSettings().conversationTimeline) {
+      removeConversationTimeline();
+      return;
+    }
+    const questions = prepareTimelineQuestions(conversationTimelineQuestions());
+    if (questions.length === 0) {
+      removeConversationTimeline();
+      return;
+    }
+    const signature = timelineSignature(questions);
+    const existing = document.querySelector(`.${timelineClass}`);
+    if (
+      existing?.dataset.codexConversationTimelineVersion === codexConversationTimelineVersion &&
+      existing?.dataset.codexConversationTimelineSignature === signature
+    ) {
+      return;
+    }
+    removeConversationTimeline();
+    const container = document.createElement("div");
+    container.className = timelineClass;
+    container.dataset.codexConversationTimelineVersion = codexConversationTimelineVersion;
+    container.dataset.codexConversationTimelineSignature = signature;
+    const track = document.createElement("div");
+    track.className = timelineTrackClass;
+    container.appendChild(track);
+    questions.forEach((question) => {
+      container.appendChild(createConversationTimelineMarker(question));
+    });
+    document.body.appendChild(container);
+  }
+
+  function readThreadScrollEntries() {
+    if (window.__codexMateThreadScrollEntries && typeof window.__codexMateThreadScrollEntries === "object") {
+      return { ...window.__codexMateThreadScrollEntries };
+    }
+    try {
+      const parsed = JSON.parse(localStorage.getItem(codexThreadScrollKey) || "{}");
+      const rawEntries = parsed?.version === codexThreadScrollVersion && parsed?.entries && typeof parsed.entries === "object"
+        ? parsed.entries
+        : {};
+      const entries = Object.create(null);
+      Object.entries(rawEntries).forEach(([key, value]) => {
+        const safeKey = validThreadScrollSessionKey(key);
+        if (!safeKey || !value || typeof value !== "object") return;
+        entries[safeKey] = {
+          top: finiteScrollNumber(value.top),
+          scrollHeight: finiteNonNegativeNumber(value.scrollHeight),
+          clientHeight: finiteNonNegativeNumber(value.clientHeight),
+          at: finiteNonNegativeNumber(value.at),
+        };
+      });
+      window.__codexMateThreadScrollEntries = entries;
+      return { ...entries };
+    } catch {
+      window.__codexMateThreadScrollEntries = Object.create(null);
+      return {};
+    }
+  }
+
+  function writeThreadScrollEntries(entries) {
+    const pruned = Object.create(null);
+    Object.entries(entries || {})
+      .sort((left, right) => finiteNonNegativeNumber(right[1]?.at) - finiteNonNegativeNumber(left[1]?.at))
+      .slice(0, codexThreadScrollMaxEntries)
+      .forEach(([key, value]) => {
+        const safeKey = validThreadScrollSessionKey(key);
+        if (safeKey) pruned[safeKey] = value;
+      });
+    window.__codexMateThreadScrollEntries = pruned;
+    localStorage.setItem(codexThreadScrollKey, JSON.stringify({ version: codexThreadScrollVersion, entries: pruned }));
+  }
+
+  function currentThreadScroller() {
+    const explicit = document.querySelector(".thread-scroll-container");
+    if (explicit?.isConnected) return explicit;
+    const root = conversationTimelineRoot();
+    if (!root?.isConnected) return document.scrollingElement || document.documentElement;
+    const style = getComputedStyle(root);
+    if (/(auto|scroll)/.test(style.overflowY) && root.scrollHeight > root.clientHeight) return root;
+    return nearestTimelineScroller(root);
+  }
+
+  function threadScrollRuntime() {
+    if (!window.__codexMateThreadScrollRuntime || typeof window.__codexMateThreadScrollRuntime !== "object") {
+      window.__codexMateThreadScrollRuntime = {
+        activeSessionId: "",
+        activeScroller: null,
+        scrollListener: null,
+        scrollListenerUsesWindow: false,
+        lastSavedTop: -1,
+        lastSavedHeight: -1,
+        lastSavedClientHeight: -1,
+        applyingRestore: false,
+        userScrollIntentUntil: 0,
+      };
+    }
+    return window.__codexMateThreadScrollRuntime;
+  }
+
+  function clearThreadScrollRestoreTimers() {
+    (window.__codexMateThreadScrollRestoreTimers || []).forEach((timer) => clearTimeout(timer));
+    window.__codexMateThreadScrollRestoreTimers = [];
+  }
+
+  function userScrollIntentActive() {
+    return finiteNonNegativeNumber(threadScrollRuntime().userScrollIntentUntil) > Date.now();
+  }
+
+  function threadScrollTargetTop(scroller, targetTop) {
+    const max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+    return Math.max(0, Math.min(max, finiteScrollNumber(targetTop)));
+  }
+
+  function bindThreadScrollListener(scroller) {
+    const runtime = threadScrollRuntime();
+    const nextUsesWindow = !scroller || scroller === document.scrollingElement || scroller === document.documentElement || scroller === document.body;
+    if (runtime.scrollListener && runtime.scrollListenerVersion !== codexThreadScrollListenerVersion) {
+      const oldTarget = runtime.scrollListenerUsesWindow ? window : runtime.activeScroller;
+      oldTarget?.removeEventListener?.("scroll", runtime.scrollListener, true);
+      runtime.scrollListener = null;
+    }
+    runtime.scrollListener = runtime.scrollListener || (() => scheduleThreadScrollSave());
+    runtime.scrollListenerVersion = codexThreadScrollListenerVersion;
+    if (runtime.activeScroller === scroller && runtime.scrollListenerUsesWindow === nextUsesWindow) return;
+    const oldTarget = runtime.scrollListenerUsesWindow ? window : runtime.activeScroller;
+    oldTarget?.removeEventListener?.("scroll", runtime.scrollListener, true);
+    runtime.activeScroller = scroller;
+    runtime.scrollListenerUsesWindow = nextUsesWindow;
+    if (!scroller || !codexMateSettings().threadScrollRestore) return;
+    const target = nextUsesWindow ? window : scroller;
+    target.addEventListener("scroll", runtime.scrollListener, true);
+  }
+
+  function saveThreadScrollPositionNow(sessionId = threadScrollRuntime().activeSessionId, scroller = threadScrollRuntime().activeScroller) {
+    if (!codexMateSettings().threadScrollRestore) return;
+    const runtime = threadScrollRuntime();
+    const key = validThreadScrollSessionKey(sessionId);
+    if (!key || !scroller || runtime.applyingRestore) return;
+    const snapshot = {
+      top: finiteScrollNumber(scroller.scrollTop),
+      scrollHeight: finiteNonNegativeNumber(scroller.scrollHeight),
+      clientHeight: finiteNonNegativeNumber(scroller.clientHeight),
+      at: Date.now(),
+    };
+    if (Math.abs(runtime.lastSavedTop - snapshot.top) < 2 && runtime.lastSavedHeight === snapshot.scrollHeight && runtime.lastSavedClientHeight === snapshot.clientHeight) return;
+    const entries = readThreadScrollEntries();
+    entries[key] = snapshot;
+    writeThreadScrollEntries(entries);
+    runtime.lastSavedTop = snapshot.top;
+    runtime.lastSavedHeight = snapshot.scrollHeight;
+    runtime.lastSavedClientHeight = snapshot.clientHeight;
+  }
+
+  function scheduleThreadScrollSave() {
+    if (!codexMateSettings().threadScrollRestore || window.__codexMateThreadScrollSaveTimer) return;
+    window.__codexMateThreadScrollSaveTimer = setTimeout(() => {
+      window.__codexMateThreadScrollSaveTimer = null;
+      saveThreadScrollPositionNow();
+    }, codexThreadScrollSaveThrottleMs);
+  }
+
+  function restoreThreadScrollPosition(sessionId) {
+    const runtime = threadScrollRuntime();
+    const key = validThreadScrollSessionKey(sessionId);
+    if (!codexMateSettings().threadScrollRestore || !key || runtime.activeSessionId !== key || userScrollIntentActive()) return;
+    const entry = readThreadScrollEntries()[key];
+    if (!entry) return;
+    const scroller = currentThreadScroller();
+    if (!scroller) return;
+    bindThreadScrollListener(scroller);
+    const targetTop = threadScrollTargetTop(scroller, entry.top);
+    if (Math.abs(scroller.scrollTop - targetTop) <= 1) return;
+    runtime.applyingRestore = true;
+    try {
+      if (typeof scroller.scrollTo === "function") {
+        scroller.scrollTo({ top: targetTop, behavior: "auto" });
+      } else {
+        scroller.scrollTop = targetTop;
+      }
+    } finally {
+      runtime.applyingRestore = false;
+    }
+    runtime.lastSavedTop = targetTop;
+    runtime.lastSavedHeight = finiteNonNegativeNumber(scroller.scrollHeight);
+    runtime.lastSavedClientHeight = finiteNonNegativeNumber(scroller.clientHeight);
+  }
+
+  function scheduleThreadScrollRestore(sessionId) {
+    clearThreadScrollRestoreTimers();
+    const key = validThreadScrollSessionKey(sessionId);
+    if (!codexMateSettings().threadScrollRestore || !key || userScrollIntentActive() || !readThreadScrollEntries()[key]) return;
+    const restoreRevision = (window.__codexMateThreadScrollRestoreRevision || 0) + 1;
+    window.__codexMateThreadScrollRestoreRevision = restoreRevision;
+    window.__codexMateThreadScrollRestoreTimers = codexThreadScrollRestoreDelaysMs.map((delay) => setTimeout(() => {
+      if (window.__codexMateThreadScrollRestoreRevision !== restoreRevision) return;
+      restoreThreadScrollPosition(key);
+    }, delay));
+  }
+
+  function syncThreadScrollState(forceRestore = false) {
+    const runtime = threadScrollRuntime();
+    const nextSessionId = validThreadScrollSessionKey(currentSessionRef().session_id);
+    if (!nextSessionId) return;
+    if (!codexMateSettings().threadScrollRestore) {
+      bindThreadScrollListener(null);
+      clearThreadScrollRestoreTimers();
+      runtime.activeSessionId = nextSessionId;
+      return;
+    }
+    const nextScroller = currentThreadScroller();
+    bindThreadScrollListener(nextScroller);
+    if (runtime.activeSessionId !== nextSessionId) {
+      runtime.lastSavedTop = -1;
+      runtime.lastSavedHeight = -1;
+      runtime.lastSavedClientHeight = -1;
+      runtime.activeSessionId = nextSessionId;
+      runtime.userScrollIntentUntil = 0;
+      scheduleThreadScrollRestore(nextSessionId);
+      return;
+    }
+    if (forceRestore && !userScrollIntentActive()) scheduleThreadScrollRestore(nextSessionId);
+  }
+
+  function markThreadScrollUserIntent(event) {
+    if (!codexMateSettings().threadScrollRestore) return;
+    const scroller = threadScrollRuntime().activeScroller || currentThreadScroller();
+    if (!scroller) return;
+    const target = event?.target;
+    if (target && target !== document && target !== window && !scroller.contains?.(target) && target !== scroller) return;
+    threadScrollRuntime().userScrollIntentUntil = Date.now() + codexThreadScrollUserIntentWindowMs;
+    clearThreadScrollRestoreTimers();
+  }
+
+  function installThreadScrollUserIntentCapture() {
+    if (window.__codexMateThreadScrollUserIntentInstalled === codexThreadScrollUserIntentVersion) return;
+    document.removeEventListener("wheel", window.__codexMateThreadScrollWheelIntentHandler, true);
+    document.removeEventListener("touchmove", window.__codexMateThreadScrollTouchIntentHandler, true);
+    document.removeEventListener("keydown", window.__codexMateThreadScrollKeyIntentHandler, true);
+    window.__codexMateThreadScrollWheelIntentHandler = (event) => markThreadScrollUserIntent(event);
+    window.__codexMateThreadScrollTouchIntentHandler = (event) => markThreadScrollUserIntent(event);
+    window.__codexMateThreadScrollKeyIntentHandler = (event) => {
+      if (event.target?.closest?.("input, textarea, select, [contenteditable='true'], [contenteditable='']")) return;
+      if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " ", "Spacebar"].includes(event.key)) markThreadScrollUserIntent(event);
+    };
+    document.addEventListener("wheel", window.__codexMateThreadScrollWheelIntentHandler, { capture: true, passive: true });
+    document.addEventListener("touchmove", window.__codexMateThreadScrollTouchIntentHandler, { capture: true, passive: true });
+    document.addEventListener("keydown", window.__codexMateThreadScrollKeyIntentHandler, true);
+    window.__codexMateThreadScrollUserIntentInstalled = codexThreadScrollUserIntentVersion;
+  }
+
+  function installThreadScrollNavigationCapture() {
+    document.removeEventListener("pointerdown", window.__codexMateThreadScrollNavigationHandler, true);
+    document.removeEventListener("click", window.__codexMateThreadScrollClickNavigationHandler, true);
+    const handler = (event) => {
+      if (!codexMateSettings().threadScrollRestore) return;
+      const row = event.target?.closest?.("[data-app-action-sidebar-thread-id]");
+      if (!row) return;
+      saveThreadScrollPositionNow();
+      scheduleThreadScrollRestore(sessionRefFromRow(row).session_id);
+    };
+    window.__codexMateThreadScrollNavigationHandler = handler;
+    window.__codexMateThreadScrollClickNavigationHandler = handler;
+    document.addEventListener("pointerdown", handler, true);
+    document.addEventListener("click", handler, true);
+  }
+
+  function installThreadScrollRouteHooks() {
+    if (window.__codexMateThreadScrollRouteHooksInstalled === codexThreadScrollRouteHooksVersion) return;
+    window.__codexMateThreadScrollRouteHooksInstalled = codexThreadScrollRouteHooksVersion;
+    window.__codexMateThreadScrollOriginals = window.__codexMateThreadScrollOriginals || {};
+    const originals = window.__codexMateThreadScrollOriginals;
+    ["pushState", "replaceState"].forEach((method) => {
+      const original = originals[`history_${method}`] || history[method];
+      originals[`history_${method}`] = original;
+      if (typeof original !== "function") return;
+      history[method] = function codexMateThreadScrollPatchedHistory(...args) {
+        saveThreadScrollPositionNow();
+        const result = original.apply(this, args);
+        setTimeout(() => syncThreadScrollState(true), 0);
+        return result;
+      };
+    });
+    window.removeEventListener("popstate", window.__codexMateThreadScrollPopStateHandler, true);
+    window.removeEventListener("hashchange", window.__codexMateThreadScrollHashChangeHandler, true);
+    document.removeEventListener("visibilitychange", window.__codexMateThreadScrollVisibilityHandler, true);
+    window.__codexMateThreadScrollPopStateHandler = () => {
+      saveThreadScrollPositionNow();
+      setTimeout(() => syncThreadScrollState(true), 0);
+    };
+    window.__codexMateThreadScrollHashChangeHandler = window.__codexMateThreadScrollPopStateHandler;
+    window.__codexMateThreadScrollVisibilityHandler = () => {
+      if (document.visibilityState === "hidden") saveThreadScrollPositionNow();
+    };
+    window.addEventListener("popstate", window.__codexMateThreadScrollPopStateHandler, true);
+    window.addEventListener("hashchange", window.__codexMateThreadScrollHashChangeHandler, true);
+    document.addEventListener("visibilitychange", window.__codexMateThreadScrollVisibilityHandler, true);
+  }
+
   function scanLightweight() {
     installStyle();
     installCodexMateMenu();
     installDeleteButtonEventDelegation();
+    installThreadScrollNavigationCapture();
+    installThreadScrollUserIntentCapture();
+    installThreadScrollRouteHooks();
   }
 
   function scanDeferred() {
     enablePluginEntry();
     unblockPluginInstallButtons();
     sessionRows().forEach(tryAttachButton);
+    syncActionGroupsLayout();
     updateDeleteButtonOffsets();
     archivedPageRows().forEach(attachArchivedPageDeleteButton);
     installArchivedDeleteAllButton();
+    refreshConversationTimeline();
+    syncThreadScrollState();
   }
 
   function runScanStep(step) {
@@ -1467,10 +2117,10 @@
   }
 
   function isExtensionUiNode(node) {
-    return !!node?.closest?.(".codex-delete-toast, .codex-delete-confirm-overlay, .codex-mate-modal-overlay, #codex-mate-menu");
+    return !!node?.closest?.(`.codex-delete-toast, .codex-delete-confirm-overlay, .codex-mate-modal-overlay, .${actionTooltipClass}, .${timelineClass}, #codex-mate-menu`);
   }
 
-  const scanRelevantSelector = '[data-app-action-sidebar-thread-id], [data-codex-archive-page-row="true"], [data-codex-archive-delete-all], .app-header-tint, button[aria-label="已归档对话"], button[aria-label="Archived conversations"], button:disabled.w-full.justify-center, [role="button"][aria-disabled="true"].cursor-not-allowed';
+  const scanRelevantSelector = '[data-app-action-sidebar-thread-id], [data-codex-archive-page-row="true"], [data-codex-archive-delete-all], .app-header-tint, button[aria-label="已归档对话"], button[aria-label="Archived conversations"], button:disabled.w-full.justify-center, [role="button"][aria-disabled="true"].cursor-not-allowed, [data-message-author-role="user"], [data-testid="conversation-turn"]';
 
   function isScanRelevantNode(node) {
     if (node.nodeType !== 1) return false;
@@ -1481,6 +2131,8 @@
   function isChatContentMutation(mutation) {
     const target = mutation.target;
     if (target?.closest?.('[data-message-author-role], [data-testid="conversation-turn"], main .prose')) {
+      const changedNodes = [...Array.from(mutation.addedNodes), ...Array.from(mutation.removedNodes)];
+      if (changedNodes.some(nodeLooksLikeTimelineQuestion)) return false;
       return !Array.from(mutation.addedNodes).some(isScanRelevantNode) && !Array.from(mutation.removedNodes).some(isScanRelevantNode);
     }
     return false;

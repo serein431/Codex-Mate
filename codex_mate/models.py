@@ -12,6 +12,11 @@ class DeleteStatus(str, Enum):
     UNDONE = "undone"
 
 
+class ExportStatus(str, Enum):
+    EXPORTED = "exported"
+    FAILED = "failed"
+
+
 @dataclass(frozen=True)
 class SessionRef:
     session_id: str
@@ -37,4 +42,22 @@ class DeleteResult:
             "message": self.message,
             "undo_token": self.undo_token,
             "backup_path": self.backup_path,
+        }
+
+
+@dataclass(frozen=True)
+class ExportResult:
+    status: ExportStatus
+    session_id: str
+    message: str
+    filename: str | None = None
+    markdown: str | None = None
+
+    def to_dict(self) -> dict[str, str | None]:
+        return {
+            "status": self.status.value,
+            "session_id": self.session_id,
+            "message": self.message,
+            "filename": self.filename,
+            "markdown": self.markdown,
         }

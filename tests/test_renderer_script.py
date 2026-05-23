@@ -50,23 +50,24 @@ def test_renderer_script_supports_codex_sidebar_thread_attributes():
     assert "hasSessionHint" not in session_rows_code
 
 
-def test_renderer_script_positions_delete_button_without_affecting_layout():
+def test_renderer_script_positions_session_action_group_without_affecting_layout():
     text = Path("codex_mate/inject/renderer-inject.js").read_text(encoding="utf-8")
+    assert "codex-session-actions" in text
+    assert "codex-session-action-button" in text
     assert "position: absolute" in text
-    assert "right: 28px" in text
+    assert "right: var(--codex-session-actions-right, 28px)" in text
     assert "top: 50%" in text
     assert "transform: translateY(-50%)" in text
-    assert "min-width: 38px" in text
-    assert "height: 22px" in text
-    assert "font: inherit" in text
-    assert "font-size: 12px" in text
-    assert "line-height: 18px" in text
+    assert "width: 26px" in text
+    assert "height: 26px" in text
+    assert "font: 14px/1 system-ui" in text
     assert "border-radius: 6px" in text
     assert "aria-label" in text
     start = text.index("function attachButton")
     end = text.index("\n\n  function tryAttachButton", start)
     attach_button_code = text[start:end]
-    assert "button.textContent = \"删除\"" in attach_button_code
+    assert "configureSvgActionButton(deleteButton, \"删除\", trashIconSvg())" in attach_button_code
+    assert "configureActionButton(exportButton, \"导出 Markdown\", \"⇩\")" in attach_button_code
     assert "codex-delete-icon" not in attach_button_code
 
 
@@ -200,26 +201,26 @@ def test_renderer_script_toast_does_not_capture_page_interactions():
 def test_renderer_script_sidebar_delete_opens_on_pointerup_when_click_is_unreliable():
     text = Path("codex_mate/inject/renderer-inject.js").read_text(encoding="utf-8")
     assert "openDeleteConfirm" in text
-    assert "codexDeleteVersion = \"5\"" in text
-    assert "existingDeleteButtons.length === 1" in text
-    assert "existingDeleteButtons[0].dataset.codexDeleteVersion === codexDeleteVersion" in text
-    assert "existingDeleteButtons.forEach((button) => button.remove())" in text
+    assert "codexDeleteVersion = \"6\"" in text
+    assert "codexExportVersion = \"1\"" in text
+    assert "existingGroup?.querySelector" in text
+    assert "removeActionGroups(row)" in text
     assert "row.dataset.codexDeleteRow = \"false\"" in text
     assert "installDeleteButtonEventDelegation" in text
     assert "codexMateDocumentDeleteHandler" in text
     assert "document.addEventListener(\"pointerup\", handler, true)" in text
     assert "document.addEventListener(\"click\", handler, true)" in text
-    assert "button.addEventListener(\"pointerup\", openDeleteConfirm, true)" in text
+    assert "button.addEventListener(\"pointerup\", onActivate, true)" in text
 
 
     text = Path("codex_mate/inject/renderer-inject.js").read_text(encoding="utf-8")
     assert "updateDeleteButtonOffsets" in text
-    assert "codexDeleteStyleVersion = \"9\"" in text
-    assert "right: 66px" in text
+    assert "codexDeleteStyleVersion = \"10\"" in text
+    assert "right: max(66px, var(--codex-session-actions-right, 28px))" in text
     assert "确认" in text
     assert "归档对话" in text
     assert "button.getAttribute(\"aria-label\")" in text
-    assert "label === \"归档对话\"" in text
+    assert "button.closest(`.${actionGroupClass}`)" in text
 
 
     text = Path("codex_mate/inject/renderer-inject.js").read_text(encoding="utf-8")
@@ -294,51 +295,60 @@ def test_renderer_script_does_not_include_legacy_project_file_tree_panel():
     assert "项目文件树" not in text
 
 
-def test_renderer_script_adds_entry_for_file_tree_panel():
+def test_renderer_script_removes_native_file_tree_entry():
     text = Path("codex_mate/inject/renderer-inject.js").read_text(encoding="utf-8")
 
-    assert "data-codex-mate-open-files" in text
-    assert "codex-mate-file-button" in text
-    assert "function findNativeFilePanelButton" in text
-    assert "function findNativeReviewFileButton" in text
-    assert "function isInsideReviewPanel" in text
-    assert "function isUnsafeNativeFilePanelButton" in text
-    assert "isInsideReviewPanel(button)" in text
-    assert "codex-review-diff-card" in text
-    assert "在编辑器中打开|Open in editor|Cursor|VS Code|打开文件|Open file" in text
-    assert "rect.top >= 40" in text
-    assert "rect.bottom < 0" in text
-    assert "function openNativeWorkspaceFileTab" in text
-    assert "async function nativeFileSearchTerms" in text
-    assert "function nativeWorkspaceFirstFileNameTerms" in text
-    assert 'postJson("/workspace/first-file", {})' in text
-    assert "function closeNativeFileSearch" in text
-    assert "function closeAnyNativeFileSearch" in text
-    assert "await nativeFileSearchTerms()" in text
-    assert "Date.now() + 6000" in text
-    assert '"pyproject", "README", "package", "AGENTS", ".gitignore", "main", "index", "src"' in text
-    assert "function firstNativeFileSearchResult" in text
-    assert "function activateNativeFileSearchResult" in text
-    assert "file-search-command-menu" in text
-    assert "KeyboardEvent(\"keydown\", { key: \"Enter\"" in text
-    assert "KeyboardEvent(\"keypress\", { key: \"Enter\"" in text
-    assert "KeyboardEvent(\"keyup\", { key: \"Escape\"" in text
-    assert "await delay(450)" in text
-    assert "No results|No files|Search files|搜索文件" in text
-    assert "_valueTracker" in text
-    assert "function openNativeFilePanel" in text
-    assert "筛选文件" in text
-    assert "文件列表" in text
-    assert "在审查中显示文件" in text
-    assert "codexMateFileButtonVersion = \"22\"" in text
-    assert "没有找到可打开的原生文件入口" in text
-    assert "原生文件树没有响应" in text
+    assert "data-codex-mate-open-files" not in text
+    assert "codex-mate-file-button" not in text
+    assert "function findNativeFilePanelButton" not in text
+    assert "function openNativeWorkspaceFileTab" not in text
+    assert "async function nativeFileSearchTerms" not in text
+    assert 'postJson("/workspace/first-file", {})' not in text
+    assert "function openNativeFilePanel" not in text
     assert "function codexFetch" not in text
     assert "sendMessageFromView" not in text
     assert "function openCodexMateFileTreePanel" not in text
     assert "function renderCodexMateFileTree" not in text
     assert 'postJson("/file-tree/roots"' not in text
     assert 'postJson("/file-tree/list"' not in text
+
+
+def test_renderer_script_adds_markdown_export_contract():
+    text = Path("codex_mate/inject/renderer-inject.js").read_text(encoding="utf-8")
+
+    assert "markdownExport: true" in text
+    assert "codex-export-button" in text
+    assert "function downloadMarkdown" in text
+    assert "async function exportMarkdown" in text
+    assert 'postJson("/export-markdown", ref)' in text
+    assert "导出 Markdown" in text
+    assert "text/markdown;charset=utf-8" in text
+
+
+def test_renderer_script_adds_conversation_timeline_and_scroll_restore():
+    text = Path("codex_mate/inject/renderer-inject.js").read_text(encoding="utf-8")
+
+    assert "conversationTimeline: true" in text
+    assert "threadScrollRestore: true" in text
+    assert "codex-conversation-timeline" in text
+    assert "function refreshConversationTimeline" in text
+    assert "function conversationTimelineQuestions" in text
+    assert "function createConversationTimelineMarker" in text
+    assert "function readThreadScrollEntries" in text
+    assert "function saveThreadScrollPositionNow" in text
+    assert "function restoreThreadScrollPosition" in text
+    assert "installThreadScrollRouteHooks" in text
+    assert "localStorage.setItem(codexThreadScrollKey" in text
+
+
+def test_renderer_script_adds_backend_status_contract():
+    text = Path("codex_mate/inject/renderer-inject.js").read_text(encoding="utf-8")
+
+    assert "codex-mate-backend-indicator" in text
+    assert "data-codex-mate-backend-status" in text
+    assert "function checkBackendStatus" in text
+    assert 'postJson("/backend/status", {})' in text
+    assert "后端已连接" in text
 
 
 def test_renderer_script_delegated_clicks_tolerate_text_targets():
@@ -376,6 +386,9 @@ def test_renderer_script_does_not_include_fast_mode_patch():
     assert "插件选项解锁" in text
     assert "特殊插件强制安装" in text
     assert "会话删除" in text
+    assert "Markdown 导出" in text
+    assert "对话时间线" in text
+    assert "滚动位置恢复" in text
     assert "原生菜单栏位置" in text
     assert "nativeMenuPlacement: true" in text
     assert "关于 Codex Mate" in text
@@ -413,9 +426,9 @@ def test_renderer_script_does_not_include_fast_mode_patch():
     assert 'const legacyMenuName = "Codex" + "++"' in text
     assert "label.startsWith(\"Codex Mate\")" in text
     assert "label.startsWith(legacyMenuName)" in text
-    assert "codexMateMenuVersion = \"22\"" in text
-    assert "codexMateTriggerInstalled = \"22\"" in text
-    assert "codexMateFileButtonVersion = \"22\"" in text
+    assert "codexMateMenuVersion = \"23\"" in text
+    assert "codexMateTriggerInstalled = \"23\"" in text
+    assert "codexMateFileButtonVersion" not in text
     assert "function visibleRightPanelLeft" in text
     assert "[role='tabpanel'], .absolute.top-0.bottom-0.left-0" in text
     assert "function floatingMenuLeft" in text
@@ -426,9 +439,8 @@ def test_renderer_script_does_not_include_fast_mode_patch():
     assert "cursor - rect.right >= menuWidth" in text
     assert '.ms-auto.flex.shrink-0.items-center.gap-1\\\\.5' in text
     assert 'existing && existing.isConnected' in text
-    assert "setTimeout(installCodexMateMenu, 100)" in text
     assert 'event.stopImmediatePropagation?.()' in text
     assert ".codex-mate-toolbar-button" in text
     assert 'trigger.className = "codex-mate-toolbar-button codex-mate-trigger"' in text
-    assert 'button.className = "codex-mate-toolbar-button codex-mate-file-button"' in text
+    assert "codex-mate-file-button" not in text
     assert ".codex-mate-trigger:hover" not in text

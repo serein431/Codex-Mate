@@ -119,15 +119,17 @@ def test_readme_describes_in_app_update_controls():
     assert "CodexMate-windows.zip" in text
 
 
-def test_readme_describes_native_file_tree_entry():
+def test_readme_describes_export_timeline_and_scroll_restore():
     text = Path("README.md").read_text(encoding="utf-8")
 
-    assert "顶部提供文件列表入口" in text
+    assert "导出当前对话为 Markdown" in text
     assert "## 功能说明" in text
-    assert "### 原生文件树入口" in text
-    assert "Codex 自己的文件搜索和文件预览能力" in text
-    assert "不会在 Codex Mate 里自写一套文件树" in text
-    assert "当前工作目录里的一个真实文件名" in text
+    assert "### Markdown 导出" in text
+    assert "读取本机 `state_5.sqlite`" in text
+    assert "### 对话时间线与滚动恢复" in text
+    assert "用户问题时间线" in text
+    assert "上次看到的位置" in text
+    assert "原生文件树入口" not in text
     assert "256KB" not in text
 
 

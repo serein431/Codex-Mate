@@ -31,8 +31,11 @@ class FakeDeleteService:
     def update(self):
         return {"status": "updated", "latest_version": "v9.9.9"}
 
-    def workspace_first_file(self):
-        return {"status": "ok", "name": "AGENTS.md"}
+    def export_markdown(self, session: SessionRef):
+        return {"status": "exported", "session_id": session.session_id, "message": "exported", "filename": "First.md", "markdown": "# First\n"}
+
+    def backend_status(self):
+        return {"status": "ok", "message": "后端已连接", "version": "v9.9.9"}
 
 
 def post_json(url, payload):
@@ -95,19 +98,23 @@ def test_helper_server_routes_update_actions():
     assert updated["status"] == "updated"
 
 
-def test_helper_server_routes_workspace_first_file():
+def test_helper_server_routes_export_and_backend_status():
     service = FakeDeleteService()
     server = HelperServer("127.0.0.1", 0, service)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
         base = f"http://127.0.0.1:{server.port}"
-        result = post_json(base + "/workspace/first-file", {})
+        exported = post_json(base + "/export-markdown", {"session_id": "s1", "title": "First"})
+        status = post_json(base + "/backend/status", {})
     finally:
         server.shutdown()
         thread.join(timeout=3)
 
-    assert result == {"status": "ok", "name": "AGENTS.md"}
+    assert exported["status"] == "exported"
+    assert exported["filename"] == "First.md"
+    assert status["status"] == "ok"
+    assert status["message"] == "后端已连接"
 
 
 def test_helper_server_rejects_removed_file_tree_actions():
