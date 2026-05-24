@@ -14,6 +14,15 @@ Codex Mate 是一个给 Codex App 使用的本地增强工具。它通过外部 
 
 <img src="docs/images/discussion-group-qr.jpg" alt="Codex Mate 交流群二维码" width="260">
 
+## 支持作者
+
+如果 Codex Mate 对你有帮助，欢迎请作者喝杯咖啡 ☕️
+
+- **爱发电**: [https://afdian.net/a/serein431](https://afdian.net/a/serein431)
+- **Ko-fi**: [https://ko-fi.com/serein431](https://ko-fi.com/serein431)
+
+你的支持是我持续维护和更新项目的动力！
+
 ## 主要功能
 
 - 解锁 API Key 模式下的插件入口
