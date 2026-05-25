@@ -2,6 +2,8 @@
   const helperBase = window.__CODEX_MATE_HELPER__ || "http://127.0.0.1:57321";
   const buttonClass = "codex-delete-button";
   const exportButtonClass = "codex-export-button";
+  const projectMoveButtonClass = "codex-project-move-button";
+  const projectMoveOverlayClass = "codex-project-move-overlay";
   const actionButtonClass = "codex-session-action-button";
   const actionGroupClass = "codex-session-actions";
   const actionTooltipClass = "codex-session-action-tooltip";
@@ -15,11 +17,12 @@
   const timelineMaxTopPercent = 98;
   const timelineMaxMarkerGapPercent = 3.5;
   const styleId = "codex-delete-style";
-  const codexDeleteStyleVersion = "10";
+  const codexDeleteStyleVersion = "11";
   const codexMateMenuId = "codex-mate-menu";
   const codexDeleteVersion = "6";
   const codexExportVersion = "1";
-  const codexActionGroupVersion = "1";
+  const codexProjectMoveVersion = "1";
+  const codexActionGroupVersion = "2";
   const codexArchiveDeleteAllVersion = "2";
   const codexMateVersion = window.__CODEX_MATE_VERSION__ || "dev";
   const codexMateSettingsKey = "codexMateSettings";
@@ -118,6 +121,76 @@
         box-shadow: 0 14px 40px rgba(0,0,0,.28);
         pointer-events: none;
         white-space: nowrap;
+      }
+      .${projectMoveOverlayClass} {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483200;
+        background: transparent;
+        pointer-events: auto;
+        -webkit-app-region: no-drag;
+      }
+      .codex-project-move-panel {
+        position: fixed;
+        min-width: 260px;
+        max-width: min(360px, calc(100vw - 24px));
+        max-height: min(420px, calc(100vh - 24px));
+        overflow: auto;
+        border: 1px solid rgba(255,255,255,.12);
+        border-radius: 10px;
+        background: #202124;
+        color: #f4f4f5;
+        box-shadow: 0 20px 50px rgba(0,0,0,.35);
+        padding: 8px;
+        font: 13px/18px system-ui, sans-serif;
+        letter-spacing: 0;
+      }
+      .codex-project-move-title {
+        padding: 8px 9px 7px;
+        color: #e4e4e7;
+        font-weight: 600;
+      }
+      .codex-project-move-item {
+        width: 100%;
+        min-height: 42px;
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        gap: 10px;
+        border: 0;
+        border-radius: 7px;
+        background: transparent;
+        color: inherit;
+        padding: 8px 9px;
+        text-align: left;
+        cursor: default;
+        letter-spacing: 0;
+      }
+      .codex-project-move-item:hover,
+      .codex-project-move-item:focus-visible {
+        background: rgba(127,127,127,.18);
+        outline: none;
+      }
+      .codex-project-move-label {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .codex-project-move-path {
+        grid-column: 1 / -1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: #a1a1aa;
+        font-size: 12px;
+      }
+      .codex-project-move-current {
+        color: #22c55e;
+        font-size: 12px;
+      }
+      .codex-project-move-empty {
+        padding: 8px 9px;
+        color: #a1a1aa;
       }
       .codex-archive-delete-all {
         border: 1px solid #ef4444;
@@ -441,6 +514,7 @@
       forcePluginInstall: true,
       sessionDelete: true,
       markdownExport: true,
+      projectMove: true,
       conversationTimeline: true,
       threadScrollRestore: true,
       nativeMenuPlacement: true,
@@ -596,6 +670,10 @@
           <div class="codex-mate-row">
             <div><div class="codex-mate-row-title">Markdown 导出</div><div class="codex-mate-row-description">在会话列表悬停显示导出按钮，把本地 rollout 导出为 Markdown。</div></div>
             <button type="button" class="codex-mate-toggle" data-codex-mate-setting="markdownExport"><span></span></button>
+          </div>
+          <div class="codex-mate-row">
+            <div><div class="codex-mate-row-title">会话移动</div><div class="codex-mate-row-description">在会话列表悬停显示移动按钮，可移到普通对话或其他项目。</div></div>
+            <button type="button" class="codex-mate-toggle" data-codex-mate-setting="projectMove"><span></span></button>
           </div>
           <div class="codex-mate-row">
             <div><div class="codex-mate-row-title">对话时间线</div><div class="codex-mate-row-description">在右侧显示用户问题标记，点击即可跳到对应位置。</div></div>
@@ -1032,6 +1110,328 @@
     }
   }
 
+  function numericTimestamp(value) {
+    const numeric = Number(value);
+    return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
+  }
+
+  function timestampValueToMs(value) {
+    const timestamp = numericTimestamp(value);
+    if (!timestamp) return 0;
+    return timestamp < 1000000000000 ? timestamp * 1000 : timestamp;
+  }
+
+  function timestampMsFromPayload(payload) {
+    return numericTimestamp(payload?.updated_at_ms) || timestampValueToMs(payload?.updated_at) || numericTimestamp(payload?.created_at_ms);
+  }
+
+  function projectMoveSessionKey(sessionId) {
+    const variants = threadIdVariants(sessionId);
+    const bareId = variants.find((id) => !id.startsWith("local:"));
+    return bareId || variants[0] || "";
+  }
+
+  function uuidV7TimestampMs(sessionId) {
+    const id = projectMoveSessionKey(sessionId).replaceAll("-", "");
+    if (!/^[0-9a-fA-F]{12}/.test(id)) return 0;
+    const timestamp = Number.parseInt(id.slice(0, 12), 16);
+    return Number.isFinite(timestamp) ? timestamp : 0;
+  }
+
+  function sortMsForSession(sessionId, preferredValue) {
+    return numericTimestamp(preferredValue) || uuidV7TimestampMs(sessionId);
+  }
+
+  function normalizeWorkspacePath(path) {
+    const normalized = String(path || "").trim().replace(/\\/g, "/").replace(/\/+$/, "");
+    return normalized || String(path || "").trim();
+  }
+
+  function sameWorkspacePath(left, right) {
+    const leftPath = normalizeWorkspacePath(left);
+    const rightPath = normalizeWorkspacePath(right);
+    return !!leftPath && !!rightPath && leftPath === rightPath;
+  }
+
+  function displayProjectName(path) {
+    const trimmed = String(path || "").replace(/\/+$/, "");
+    return trimmed.split(/[\\/]+/).filter(Boolean).pop() || trimmed || "未命名项目";
+  }
+
+  function projectsSection() {
+    return document.querySelector('[data-app-action-sidebar-section-heading="Projects"]');
+  }
+
+  function chatsSection() {
+    return document.querySelector('[data-app-action-sidebar-section-heading="Chats"]');
+  }
+
+  function projectRowListItem(projectRow) {
+    return projectRow.closest?.('[role="listitem"][aria-label]') || projectRow.closest?.('[role="listitem"]') || projectRow;
+  }
+
+  function nativeProjectTargets() {
+    const section = projectsSection();
+    const seen = new Set();
+    const targets = [];
+    Array.from(document.querySelectorAll("[data-app-action-sidebar-project-row]")).forEach((row) => {
+      if (section && !section.contains(row)) return;
+      const path = row.getAttribute("data-app-action-sidebar-project-id") || "";
+      const normalizedPath = normalizeWorkspacePath(path);
+      if (!normalizedPath || seen.has(normalizedPath)) return;
+      const label = row.getAttribute("data-app-action-sidebar-project-label") || row.getAttribute("aria-label") || displayProjectName(path);
+      seen.add(normalizedPath);
+      targets.push({ kind: "project", label: String(label || displayProjectName(path)), description: path, path, normalizedPath, row, listItem: projectRowListItem(row) });
+    });
+    return targets;
+  }
+
+  function projectMoveTargets() {
+    return [
+      { kind: "projectless", label: "普通对话", description: "不属于任何项目", path: "", normalizedPath: "" },
+      ...nativeProjectTargets().map((target) => ({
+        kind: "project",
+        label: target.label,
+        description: target.description,
+        path: target.path,
+        normalizedPath: target.normalizedPath,
+      })),
+    ];
+  }
+
+  function rowListItem(row) {
+    return row.closest?.('[role="listitem"]') || row;
+  }
+
+  function threadRowFromListItem(item) {
+    if (!item) return null;
+    if (item.matches?.("[data-app-action-sidebar-thread-id]")) return item;
+    return item.querySelector?.("[data-app-action-sidebar-thread-id]") || null;
+  }
+
+  function rowIsInChats(row) {
+    return !!row.closest?.('[data-app-action-sidebar-section-heading="Chats"]');
+  }
+
+  function chatsThreadList() {
+    return chatsSection()?.querySelector?.('[role="list"][aria-label="对话"], [role="list"]') || null;
+  }
+
+  function projectRowFromListItem(item) {
+    if (!item) return null;
+    if (item.matches?.("[data-app-action-sidebar-project-row]")) return item;
+    return item.querySelector?.("[data-app-action-sidebar-project-row]") || null;
+  }
+
+  function projectItemMatchesTarget(projectItem, target) {
+    const projectRow = projectRowFromListItem(projectItem);
+    const projectPath = projectRow?.getAttribute?.("data-app-action-sidebar-project-id") || "";
+    if (projectPath && sameWorkspacePath(projectPath, target.path)) return true;
+    const label = projectRow?.getAttribute?.("data-app-action-sidebar-project-label") || projectItem?.getAttribute?.("aria-label") || "";
+    return String(label).replace(/\s+/g, " ").trim() === String(target.label || displayProjectName(target.path)).replace(/\s+/g, " ").trim();
+  }
+
+  function findProjectListItem(target) {
+    const nativeTarget = nativeProjectTargets().find((project) => sameWorkspacePath(project.path, target.path));
+    if (nativeTarget?.listItem) return nativeTarget.listItem;
+    const section = projectsSection();
+    if (!section) return null;
+    return Array.from(section.querySelectorAll('[role="listitem"][aria-label]')).find((item) => projectItemMatchesTarget(item, target)) || null;
+  }
+
+  function closestProjectListItem(row) {
+    let current = row?.parentElement || null;
+    while (current) {
+      if (current.matches?.('[role="listitem"][aria-label], [role="listitem"]') && projectRowFromListItem(current)) return current;
+      current = current.parentElement;
+    }
+    return null;
+  }
+
+  function rowIsUnderTargetProject(row, target) {
+    const item = closestProjectListItem(row);
+    return !!item && projectItemMatchesTarget(item, target);
+  }
+
+  function rowIsUnderTarget(row, target) {
+    return target?.kind === "projectless" ? rowIsInChats(row) : rowIsUnderTargetProject(row, target);
+  }
+
+  function projectMoveInjectedList(projectItem) {
+    let list = projectItem.querySelector('[data-codex-project-move-injected-list="true"]');
+    if (!list) {
+      const body = Array.from(projectItem.children).find((child) => child.classList?.contains("overflow-hidden")) || projectItem;
+      list = document.createElement("div");
+      list.setAttribute("role", "list");
+      list.setAttribute("data-codex-project-move-injected-list", "true");
+      list.className = "flex flex-col";
+      body.appendChild(list);
+    }
+    return list;
+  }
+
+  function projectThreadList(projectItem, target) {
+    const projectLists = Array.from(projectItem.querySelectorAll("[data-app-action-sidebar-project-list-id]"));
+    return projectLists.find((list) => sameWorkspacePath(list.getAttribute("data-app-action-sidebar-project-list-id"), target.path))
+      || projectLists[0]
+      || projectMoveInjectedList(projectItem);
+  }
+
+  function rowSortMs(row, ref = sessionRefFromRow(row), target = null) {
+    return sortMsForSession(ref.session_id, target?.sortMs || row?.dataset?.codexProjectMoveSortMs || rowListItem(row)?.dataset?.codexProjectMoveSortMs);
+  }
+
+  function insertRowItemByTime(list, item, row, target) {
+    const ref = sessionRefFromRow(row);
+    const sortMs = rowSortMs(row, ref, target);
+    item.dataset.codexProjectMoveSortMs = String(sortMs || 0);
+    row.dataset.codexProjectMoveSortMs = String(sortMs || 0);
+    const sessionKey = projectMoveSessionKey(ref.session_id);
+    const existingItems = Array.from(list.children).filter((child) => child !== item);
+    for (const child of existingItems) {
+      const childRow = threadRowFromListItem(child);
+      if (!childRow) continue;
+      const childSortMs = rowSortMs(childRow);
+      const childKey = projectMoveSessionKey(sessionRefFromRow(childRow).session_id);
+      if (sortMs > childSortMs || (sortMs === childSortMs && sessionKey > childKey)) {
+        list.insertBefore(item, child);
+        return;
+      }
+    }
+    list.appendChild(item);
+  }
+
+  function moveRowToProjectList(row, target) {
+    const projectItem = findProjectListItem(target);
+    if (!projectItem) return false;
+    const list = projectThreadList(projectItem, target);
+    if (!list) return false;
+    const item = rowListItem(row);
+    insertRowItemByTime(list, item, row, target);
+    cachedSessionRowsAt = 0;
+    item.dataset.codexProjectMoveTargetKind = "project";
+    item.dataset.codexProjectMoveTargetCwd = target.path;
+    row.dataset.codexProjectMoveTargetKind = "project";
+    row.dataset.codexProjectMoveTargetCwd = target.path;
+    return true;
+  }
+
+  function moveRowToChats(row, target = null) {
+    const list = chatsThreadList();
+    if (!list) return false;
+    const item = rowListItem(row);
+    insertRowItemByTime(list, item, row, target);
+    cachedSessionRowsAt = 0;
+    item.dataset.codexProjectMoveTargetKind = "projectless";
+    row.dataset.codexProjectMoveTargetKind = "projectless";
+    delete item.dataset.codexProjectMoveTargetCwd;
+    delete row.dataset.codexProjectMoveTargetCwd;
+    return true;
+  }
+
+  async function moveSessionToProject(ref, target) {
+    if (!ref.session_id) throw new Error("未找到会话 ID");
+    if (!target?.path) throw new Error("目标项目路径为空");
+    const result = await postJson("/move-thread-workspace", { ...ref, target_cwd: target.path });
+    if (result.status !== "moved") throw new Error(result.message || "移动会话失败");
+    return result;
+  }
+
+  async function moveSessionToProjectless(ref) {
+    if (!ref.session_id) throw new Error("未找到会话 ID");
+    const result = await postJson("/move-thread-projectless", ref);
+    if (result.status !== "moved") throw new Error(result.message || "移动会话失败");
+    const sortKey = await postJson("/thread-sort-key", ref).catch(() => ({}));
+    return {
+      ...sortKey,
+      ...result,
+      updated_at: result.updated_at ?? sortKey.updated_at,
+      updated_at_ms: result.updated_at_ms ?? sortKey.updated_at_ms,
+      created_at_ms: result.created_at_ms ?? sortKey.created_at_ms,
+    };
+  }
+
+  function closeProjectMoveMenus() {
+    document.querySelectorAll(`.${projectMoveOverlayClass}`).forEach((node) => node.remove());
+    hideActionButtonTooltip();
+  }
+
+  function positionProjectMovePanel(panel, button) {
+    const rect = button.getBoundingClientRect();
+    const panelRect = panel.getBoundingClientRect();
+    const left = Math.min(window.innerWidth - panelRect.width - 8, Math.max(8, rect.right - panelRect.width));
+    const top = Math.min(window.innerHeight - panelRect.height - 8, Math.max(8, rect.bottom + 8));
+    panel.style.left = `${left}px`;
+    panel.style.top = `${top}px`;
+  }
+
+  async function applyProjectMove(row, ref, target) {
+    try {
+      const result = target.kind === "projectless" ? await moveSessionToProjectless(ref) : await moveSessionToProject(ref, target);
+      const movedTarget = { ...target, sortMs: timestampMsFromPayload(result), sortMsTrusted: true };
+      const moved = target.kind === "projectless" ? moveRowToChats(row, movedTarget) : moveRowToProjectList(row, movedTarget);
+      const targetLabel = target.kind === "projectless" ? "普通对话" : target.label || displayProjectName(target.path);
+      showToast(moved ? `已移动到${targetLabel}` : `已移动到${targetLabel}，刷新侧边栏后显示`, null);
+    } catch (error) {
+      showToast(`移动失败：${error?.message || error}`, null);
+    } finally {
+      closeProjectMoveMenus();
+    }
+  }
+
+  function openProjectMoveMenuForRow(row, button, ref, event) {
+    stopActionButtonEvent(row, button, event);
+    closeProjectMoveMenus();
+    const overlay = document.createElement("div");
+    overlay.className = projectMoveOverlayClass;
+    const targets = projectMoveTargets();
+    const panel = document.createElement("div");
+    panel.className = "codex-project-move-panel";
+    panel.setAttribute("role", "menu");
+    panel.innerHTML = `<div class="codex-project-move-title">移动会话</div>`;
+    if (targets.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "codex-project-move-empty";
+      empty.textContent = "没有可移动的目标";
+      panel.appendChild(empty);
+    }
+    targets.forEach((target) => {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.className = "codex-project-move-item";
+      item.setAttribute("role", "menuitem");
+      const current = rowIsUnderTarget(row, target);
+      item.innerHTML = `
+        <span class="codex-project-move-label">${escapeHtml(target.label)}</span>
+        ${current ? '<span class="codex-project-move-current">当前</span>' : "<span></span>"}
+        <span class="codex-project-move-path">${escapeHtml(target.description || target.path || "")}</span>
+      `;
+      item.addEventListener("click", (clickEvent) => {
+        clickEvent.preventDefault();
+        clickEvent.stopPropagation();
+        clickEvent.stopImmediatePropagation?.();
+        if (current) {
+          showToast("这个会话已经在这里", null);
+          closeProjectMoveMenus();
+          return;
+        }
+        item.disabled = true;
+        void applyProjectMove(row, ref, target);
+      }, true);
+      panel.appendChild(item);
+    });
+    overlay.appendChild(panel);
+    overlay.addEventListener("click", (clickEvent) => {
+      if (clickEvent.target === overlay) closeProjectMoveMenus();
+    }, true);
+    overlay.addEventListener("keydown", (keyEvent) => {
+      if (keyEvent.key === "Escape") closeProjectMoveMenus();
+    }, true);
+    document.body.appendChild(overlay);
+    positionProjectMovePanel(panel, button);
+    panel.querySelector("button")?.focus();
+  }
+
   function showToast(message, undoToken) {
     document.querySelectorAll(".codex-delete-toast").forEach((node) => node.remove());
     const toast = document.createElement("div");
@@ -1308,7 +1708,7 @@
 
   function attachButton(row) {
     const settings = codexMateSettings();
-    if (!settings.sessionDelete && !settings.markdownExport) {
+    if (!settings.sessionDelete && !settings.markdownExport && !settings.projectMove) {
       removeActionGroups(row);
       row.dataset.codexDeleteRow = "false";
       return;
@@ -1316,14 +1716,18 @@
     const existingGroup = actionGroupFromRow(row);
     const existingDeleteButton = existingGroup?.querySelector(`.${buttonClass}`);
     const existingExportButton = existingGroup?.querySelector(`.${exportButtonClass}`);
+    const existingMoveButton = existingGroup?.querySelector(`.${projectMoveButtonClass}`);
     const groupReady = existingGroup?.dataset.codexActionGroupVersion === codexActionGroupVersion;
     const deleteReady = !settings.sessionDelete || existingDeleteButton?.dataset.codexDeleteVersion === codexDeleteVersion;
     const exportReady = !settings.markdownExport || existingExportButton?.dataset.codexExportVersion === codexExportVersion;
+    const moveReady = !settings.projectMove || existingMoveButton?.dataset.codexProjectMoveVersion === codexProjectMoveVersion;
     const missingDelete = settings.sessionDelete && !existingDeleteButton;
     const missingExport = settings.markdownExport && !existingExportButton;
+    const missingMove = settings.projectMove && !existingMoveButton;
     const unexpectedDelete = !settings.sessionDelete && !!existingDeleteButton;
     const unexpectedExport = !settings.markdownExport && !!existingExportButton;
-    if (groupReady && deleteReady && exportReady && !missingDelete && !missingExport && !unexpectedDelete && !unexpectedExport) {
+    const unexpectedMove = !settings.projectMove && !!existingMoveButton;
+    if (groupReady && deleteReady && exportReady && moveReady && !missingDelete && !missingExport && !missingMove && !unexpectedDelete && !unexpectedExport && !unexpectedMove) {
       syncActionGroupLayout(row, existingGroup);
       return;
     }
@@ -1335,6 +1739,17 @@
     const group = document.createElement("div");
     group.className = actionGroupClass;
     group.dataset.codexActionGroupVersion = codexActionGroupVersion;
+    if (settings.projectMove) {
+      const moveButton = document.createElement("button");
+      moveButton.type = "button";
+      moveButton.className = `${actionButtonClass} ${projectMoveButtonClass}`;
+      moveButton.dataset.codexProjectMoveVersion = codexProjectMoveVersion;
+      configureActionButton(moveButton, "移动会话", "↗");
+      const openMoveMenu = (event) => openProjectMoveMenuForRow(row, moveButton, ref, event);
+      installActionButtonEvents(row, moveButton, openMoveMenu);
+      group.appendChild(moveButton);
+      setTimeout(() => refreshActionButton(moveButton, row, openMoveMenu), 0);
+    }
     if (settings.markdownExport) {
       const exportButton = document.createElement("button");
       exportButton.type = "button";
@@ -2117,7 +2532,7 @@
   }
 
   function isExtensionUiNode(node) {
-    return !!node?.closest?.(`.codex-delete-toast, .codex-delete-confirm-overlay, .codex-mate-modal-overlay, .${actionTooltipClass}, .${timelineClass}, #codex-mate-menu`);
+    return !!node?.closest?.(`.codex-delete-toast, .codex-delete-confirm-overlay, .codex-mate-modal-overlay, .${projectMoveOverlayClass}, .${actionTooltipClass}, .${timelineClass}, #codex-mate-menu`);
   }
 
   const scanRelevantSelector = '[data-app-action-sidebar-thread-id], [data-codex-archive-page-row="true"], [data-codex-archive-delete-all], .app-header-tint, button[aria-label="已归档对话"], button[aria-label="Archived conversations"], button:disabled.w-full.justify-center, [role="button"][aria-disabled="true"].cursor-not-allowed, [data-message-author-role="user"], [data-testid="conversation-turn"]';

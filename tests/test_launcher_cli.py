@@ -196,6 +196,42 @@ def test_bridge_routes_export_and_backend_status(tmp_path):
     assert status == {"status": "ok"}
 
 
+def test_bridge_routes_session_move_and_sort_keys(tmp_path):
+    class Service:
+        def __init__(self):
+            self.calls = []
+
+        def move_thread_workspace(self, session, target_cwd):
+            self.calls.append(("project", session.session_id, session.title, target_cwd))
+            return {"status": "moved", "session_id": session.session_id, "target_cwd": target_cwd}
+
+        def move_thread_projectless(self, session):
+            self.calls.append(("projectless", session.session_id, session.title, ""))
+            return {"status": "moved", "session_id": session.session_id, "target_cwd": ""}
+
+        def thread_sort_key(self, session):
+            return {"status": "ok", "session_id": session.session_id, "updated_at_ms": 1000}
+
+        def thread_sort_keys(self, sessions):
+            return {"status": "ok", "sort_keys": [{"session_id": session.session_id} for session in sessions]}
+
+    service = Service()
+
+    moved = launcher.handle_bridge_request(service, "/move-thread-workspace", {"session_id": "s1", "title": "First", "target_cwd": "/work/project"})
+    projectless = launcher.handle_bridge_request(service, "/move-thread-projectless", {"session_id": "s2", "title": "Second"})
+    sort_key = launcher.handle_bridge_request(service, "/thread-sort-key", {"session_id": "s1"})
+    sort_keys = launcher.handle_bridge_request(service, "/thread-sort-keys", {"sessions": [{"session_id": "s1"}, {"session_id": "s2"}]})
+
+    assert moved == {"status": "moved", "session_id": "s1", "target_cwd": "/work/project"}
+    assert projectless == {"status": "moved", "session_id": "s2", "target_cwd": ""}
+    assert sort_key == {"status": "ok", "session_id": "s1", "updated_at_ms": 1000}
+    assert sort_keys == {"status": "ok", "sort_keys": [{"session_id": "s1"}, {"session_id": "s2"}]}
+    assert service.calls == [
+        ("project", "s1", "First", "/work/project"),
+        ("projectless", "s2", "Second", ""),
+    ]
+
+
 def test_update_service_reports_backend_status(tmp_path):
     service = launcher.ApiFirstDeleteService(launcher.UnavailableApiAdapter(), None, tmp_path / "backups")
 

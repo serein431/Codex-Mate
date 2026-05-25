@@ -12,6 +12,7 @@ class FakeDeleteService:
         self.deleted = []
         self.undone = []
         self.archived_title_queries = []
+        self.moved = []
 
     def delete(self, session: SessionRef):
         self.deleted.append(session)
@@ -36,6 +37,20 @@ class FakeDeleteService:
 
     def backend_status(self):
         return {"status": "ok", "message": "后端已连接", "version": "v9.9.9"}
+
+    def move_thread_workspace(self, session: SessionRef, target_cwd: str):
+        self.moved.append((session, target_cwd))
+        return {"status": "moved", "session_id": session.session_id, "target_cwd": target_cwd}
+
+    def move_thread_projectless(self, session: SessionRef):
+        self.moved.append((session, ""))
+        return {"status": "moved", "session_id": session.session_id, "target_cwd": ""}
+
+    def thread_sort_key(self, session: SessionRef):
+        return {"status": "ok", "session_id": session.session_id, "updated_at_ms": 1000}
+
+    def thread_sort_keys(self, sessions: list[SessionRef]):
+        return {"status": "ok", "sort_keys": [{"session_id": session.session_id, "updated_at_ms": index + 1} for index, session in enumerate(sessions)]}
 
 
 def post_json(url, payload):
@@ -115,6 +130,30 @@ def test_helper_server_routes_export_and_backend_status():
     assert exported["filename"] == "First.md"
     assert status["status"] == "ok"
     assert status["message"] == "后端已连接"
+
+
+def test_helper_server_routes_session_move_and_sort_keys():
+    service = FakeDeleteService()
+    server = HelperServer("127.0.0.1", 0, service)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base = f"http://127.0.0.1:{server.port}"
+        moved = post_json(base + "/move-thread-workspace", {"session_id": "s1", "title": "First", "target_cwd": "/work/project"})
+        projectless = post_json(base + "/move-thread-projectless", {"session_id": "s2", "title": "Second"})
+        sort_key = post_json(base + "/thread-sort-key", {"session_id": "s1", "title": "First"})
+        sort_keys = post_json(base + "/thread-sort-keys", {"sessions": [{"session_id": "s1"}, {"session_id": "s2"}]})
+    finally:
+        server.shutdown()
+        thread.join(timeout=3)
+
+    assert moved == {"status": "moved", "session_id": "s1", "target_cwd": "/work/project"}
+    assert projectless == {"status": "moved", "session_id": "s2", "target_cwd": ""}
+    assert sort_key["updated_at_ms"] == 1000
+    assert sort_keys["sort_keys"] == [{"session_id": "s1", "updated_at_ms": 1}, {"session_id": "s2", "updated_at_ms": 2}]
+    assert service.moved[0][0].session_id == "s1"
+    assert service.moved[0][1] == "/work/project"
+    assert service.moved[1][0].session_id == "s2"
 
 
 def test_helper_server_rejects_removed_file_tree_actions():

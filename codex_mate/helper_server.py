@@ -15,6 +15,10 @@ class DeleteService(Protocol):
     def check_update(self) -> dict[str, object]: ...
     def update(self) -> dict[str, object]: ...
     def backend_status(self) -> dict[str, object]: ...
+    def move_thread_workspace(self, session: SessionRef, target_cwd: str) -> dict[str, object]: ...
+    def move_thread_projectless(self, session: SessionRef) -> dict[str, object]: ...
+    def thread_sort_key(self, session: SessionRef) -> dict[str, object]: ...
+    def thread_sort_keys(self, sessions: list[SessionRef]) -> dict[str, object]: ...
 
 
 class HelperServer(ThreadingHTTPServer):
@@ -57,6 +61,27 @@ class _Handler(BaseHTTPRequestHandler):
             if self.path == "/export-markdown":
                 session = SessionRef(session_id=str(payload.get("session_id", "")), title=str(payload.get("title", "")))
                 self._send_json(self.server.service.export_markdown(session))
+                return
+            if self.path == "/move-thread-workspace":
+                session = SessionRef(session_id=str(payload.get("session_id", "")), title=str(payload.get("title", "")))
+                self._send_json(self.server.service.move_thread_workspace(session, str(payload.get("target_cwd", ""))))
+                return
+            if self.path == "/move-thread-projectless":
+                session = SessionRef(session_id=str(payload.get("session_id", "")), title=str(payload.get("title", "")))
+                self._send_json(self.server.service.move_thread_projectless(session))
+                return
+            if self.path == "/thread-sort-key":
+                session = SessionRef(session_id=str(payload.get("session_id", "")), title=str(payload.get("title", "")))
+                self._send_json(self.server.service.thread_sort_key(session))
+                return
+            if self.path == "/thread-sort-keys":
+                raw_sessions = payload.get("sessions", [])
+                sessions = [
+                    SessionRef(session_id=str(item.get("session_id", "")), title=str(item.get("title", "")))
+                    for item in raw_sessions
+                    if isinstance(item, dict) and item.get("session_id")
+                ] if isinstance(raw_sessions, list) else []
+                self._send_json(self.server.service.thread_sort_keys(sessions))
                 return
             if self.path == "/check-update":
                 self._send_json(self.server.service.check_update())

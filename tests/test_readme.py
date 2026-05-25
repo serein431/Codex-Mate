@@ -10,7 +10,7 @@ LEGACY_BUNDLE_SUFFIX = "codex" + "plus" + "plus"
 def test_readme_limits_discussion_group_qr_size():
     text = Path("README.md").read_text(encoding="utf-8")
 
-    assert '<img src="docs/images/discussion-group-qr.jpg"' in text
+    assert '<img src="docs/images/discussion-group-qr.png"' in text
     assert 'width="260"' in text
     assert '![Codex Mate 交流群二维码](docs/images/discussion-group-qr.jpg)' not in text
     assert text.index("## 交流群") < text.index("## 主要功能")
@@ -123,9 +123,12 @@ def test_readme_describes_export_timeline_and_scroll_restore():
     text = Path("README.md").read_text(encoding="utf-8")
 
     assert "导出当前对话为 Markdown" in text
+    assert "移动会话到普通对话或其他项目" in text
     assert "## 功能说明" in text
     assert "### Markdown 导出" in text
     assert "读取本机 `state_5.sqlite`" in text
+    assert "### 会话移动" in text
+    assert "侧边栏里已有的项目" in text
     assert "### 对话时间线与滚动恢复" in text
     assert "用户问题时间线" in text
     assert "上次看到的位置" in text

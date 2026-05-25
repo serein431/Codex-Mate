@@ -138,6 +138,26 @@ class ApiFirstDeleteService:
     def backend_status(self) -> dict[str, object]:
         return {"status": "ok", "message": "后端已连接", "version": __version__}
 
+    def move_thread_workspace(self, session: SessionRef, target_cwd: str) -> dict[str, object]:
+        if self.local_adapter is None:
+            return {"status": "failed", "session_id": session.session_id, "message": "No local database configured"}
+        return self.local_adapter.move_codex_thread_workspace(session, target_cwd)
+
+    def move_thread_projectless(self, session: SessionRef) -> dict[str, object]:
+        if self.local_adapter is None:
+            return {"status": "failed", "session_id": session.session_id, "message": "No local database configured"}
+        return self.local_adapter.move_codex_thread_projectless(session)
+
+    def thread_sort_key(self, session: SessionRef) -> dict[str, object]:
+        if self.local_adapter is None:
+            return {"status": "failed", "session_id": session.session_id, "message": "No local database configured"}
+        return self.local_adapter.codex_thread_sort_key(session)
+
+    def thread_sort_keys(self, sessions: list[SessionRef]) -> dict[str, object]:
+        if self.local_adapter is None:
+            return {"status": "failed", "message": "No local database configured", "sort_keys": []}
+        return self.local_adapter.codex_thread_sort_keys(sessions)
+
     def _release_payload(self, status: str, release: updater.Release, message: str, *, can_update: bool) -> dict[str, object]:
         return {
             "status": status,
@@ -529,6 +549,23 @@ def handle_bridge_request(service: ApiFirstDeleteService, path: str, payload: di
     if path == "/export-markdown":
         session = SessionRef(session_id=str(payload.get("session_id", "")), title=str(payload.get("title", "")))
         return service.export_markdown(session)
+    if path == "/move-thread-workspace":
+        session = SessionRef(session_id=str(payload.get("session_id", "")), title=str(payload.get("title", "")))
+        return service.move_thread_workspace(session, str(payload.get("target_cwd", "")))
+    if path == "/move-thread-projectless":
+        session = SessionRef(session_id=str(payload.get("session_id", "")), title=str(payload.get("title", "")))
+        return service.move_thread_projectless(session)
+    if path == "/thread-sort-key":
+        session = SessionRef(session_id=str(payload.get("session_id", "")), title=str(payload.get("title", "")))
+        return service.thread_sort_key(session)
+    if path == "/thread-sort-keys":
+        raw_sessions = payload.get("sessions", [])
+        sessions = [
+            SessionRef(session_id=str(item.get("session_id", "")), title=str(item.get("title", "")))
+            for item in raw_sessions
+            if isinstance(item, dict) and item.get("session_id")
+        ] if isinstance(raw_sessions, list) else []
+        return service.thread_sort_keys(sessions)
     if path == "/backend/status":
         return service.backend_status()
     return {"status": DeleteStatus.FAILED.value, "session_id": str(payload.get("session_id", "")), "message": "Unknown bridge path"}

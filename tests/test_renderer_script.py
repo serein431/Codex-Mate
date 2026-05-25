@@ -215,7 +215,7 @@ def test_renderer_script_sidebar_delete_opens_on_pointerup_when_click_is_unrelia
 
     text = Path("codex_mate/inject/renderer-inject.js").read_text(encoding="utf-8")
     assert "updateDeleteButtonOffsets" in text
-    assert "codexDeleteStyleVersion = \"10\"" in text
+    assert "codexDeleteStyleVersion = \"11\"" in text
     assert "right: max(66px, var(--codex-session-actions-right, 28px))" in text
     assert "确认" in text
     assert "归档对话" in text
@@ -323,6 +323,23 @@ def test_renderer_script_adds_markdown_export_contract():
     assert 'postJson("/export-markdown", ref)' in text
     assert "导出 Markdown" in text
     assert "text/markdown;charset=utf-8" in text
+
+
+def test_renderer_script_adds_session_move_contract():
+    text = Path("codex_mate/inject/renderer-inject.js").read_text(encoding="utf-8")
+
+    assert "projectMove: true" in text
+    assert "codex-project-move-button" in text
+    assert "codex-project-move-overlay" in text
+    assert "function projectMoveTargets" in text
+    assert "function openProjectMoveMenuForRow" in text
+    assert "async function moveSessionToProject" in text
+    assert "async function moveSessionToProjectless" in text
+    assert 'postJson("/move-thread-workspace"' in text
+    assert 'postJson("/move-thread-projectless"' in text
+    assert 'postJson("/thread-sort-key", ref)' in text
+    assert "会话移动" in text
+    assert "移动会话" in text
 
 
 def test_renderer_script_adds_conversation_timeline_and_scroll_restore():

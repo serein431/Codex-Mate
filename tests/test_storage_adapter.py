@@ -1,3 +1,4 @@
+import json
 import sqlite3
 
 from codex_mate.backup_store import BackupStore
@@ -340,6 +341,119 @@ def test_delete_local_session_uses_chinese_success_message(tmp_path):
     result = adapter.delete_local(SessionRef(session_id="s1", title="First"))
 
     assert result.message == "已从本地存储删除"
+
+
+def test_move_codex_thread_workspace_updates_database_rollout_and_global_state(tmp_path):
+    db_path = tmp_path / "state_5.sqlite"
+    rollout_path = tmp_path / "rollout.jsonl"
+    rollout_path.write_text(
+        '{"type":"session_meta","payload":{"id":"t1","cwd":"/old/project","title":"Codex Thread"}}\n'
+        '{"type":"session_meta","payload":{"id":"other","cwd":"/old/project"}}\n'
+        '{"type":"message","payload":{"text":"hello"}}\n',
+        encoding="utf-8",
+    )
+    create_codex_thread_db(db_path, rollout_path)
+    with sqlite3.connect(db_path) as db:
+        db.execute("ALTER TABLE threads ADD COLUMN cwd TEXT")
+        db.execute("ALTER TABLE threads ADD COLUMN updated_at INTEGER")
+        db.execute("ALTER TABLE threads ADD COLUMN updated_at_ms INTEGER")
+        db.execute("ALTER TABLE threads ADD COLUMN created_at_ms INTEGER")
+        db.execute(
+            "UPDATE threads SET cwd = '/old/project', updated_at = 100, updated_at_ms = 100000, created_at_ms = 90000 WHERE id = 't1'"
+        )
+    (tmp_path / ".codex-global-state.json").write_text(
+        json.dumps(
+            {
+                "projectless-thread-ids": ["local:t1", "keep"],
+                "thread-workspace-root-hints": {"local:t1": "/old/project", "t1": "/old/project", "keep": "/keep"},
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    adapter = SQLiteStorageAdapter(db_path, BackupStore(tmp_path / "backups"))
+
+    result = adapter.move_codex_thread_workspace(SessionRef(session_id="local:t1", title="Codex Thread"), "/new/project")
+
+    assert result["status"] == "moved"
+    assert result["session_id"] == "t1"
+    assert result["previous_cwd"] == "/old/project"
+    assert result["target_cwd"] == "/new/project"
+    assert result["rollout_updated"] is True
+    assert result["updated_at"] == 100
+    assert result["updated_at_ms"] == 100000
+    assert result["created_at_ms"] == 90000
+    with sqlite3.connect(db_path) as db:
+        assert db.execute("SELECT cwd FROM threads WHERE id = 't1'").fetchone()[0] == "/new/project"
+    rollout_lines = [json.loads(line) for line in rollout_path.read_text(encoding="utf-8").splitlines()]
+    assert rollout_lines[0]["payload"]["cwd"] == "/new/project"
+    assert rollout_lines[1]["payload"]["cwd"] == "/old/project"
+    state = json.loads((tmp_path / ".codex-global-state.json").read_text(encoding="utf-8"))
+    assert state["projectless-thread-ids"] == ["keep"]
+    assert state["thread-workspace-root-hints"]["t1"] == "/new/project"
+    assert "local:t1" not in state["thread-workspace-root-hints"]
+
+
+def test_move_codex_thread_projectless_clears_workspace_and_marks_projectless(tmp_path):
+    db_path = tmp_path / "state_5.sqlite"
+    rollout_path = tmp_path / "rollout.jsonl"
+    rollout_path.write_text('{"type":"session_meta","payload":{"id":"t1","cwd":"/old/project"}}\n', encoding="utf-8")
+    create_codex_thread_db(db_path, rollout_path)
+    with sqlite3.connect(db_path) as db:
+        db.execute("ALTER TABLE threads ADD COLUMN cwd TEXT")
+        db.execute("UPDATE threads SET cwd = '/old/project' WHERE id = 't1'")
+    (tmp_path / ".codex-global-state.json").write_text(
+        '{"projectless-thread-ids":["keep"],"thread-workspace-root-hints":{"t1":"/old/project","local:t1":"/old/project","keep":"/keep"}}\n',
+        encoding="utf-8",
+    )
+    adapter = SQLiteStorageAdapter(db_path, BackupStore(tmp_path / "backups"))
+
+    result = adapter.move_codex_thread_projectless(SessionRef(session_id="t1", title="Codex Thread"))
+
+    assert result["status"] == "moved"
+    assert result["session_id"] == "t1"
+    assert result["previous_cwd"] == "/old/project"
+    assert result["target_cwd"] == ""
+    with sqlite3.connect(db_path) as db:
+        assert db.execute("SELECT cwd FROM threads WHERE id = 't1'").fetchone()[0] == ""
+    assert json.loads(rollout_path.read_text(encoding="utf-8").strip())["payload"]["cwd"] == ""
+    state = json.loads((tmp_path / ".codex-global-state.json").read_text(encoding="utf-8"))
+    assert state["projectless-thread-ids"] == ["keep", "t1"]
+    assert "t1" not in state["thread-workspace-root-hints"]
+    assert "local:t1" not in state["thread-workspace-root-hints"]
+
+
+def test_codex_thread_sort_keys_return_timestamp_payloads(tmp_path):
+    db_path = tmp_path / "state_5.sqlite"
+    rollout_path = tmp_path / "rollout.jsonl"
+    create_codex_thread_db(db_path, rollout_path)
+    with sqlite3.connect(db_path) as db:
+        db.execute("ALTER TABLE threads ADD COLUMN updated_at INTEGER")
+        db.execute("ALTER TABLE threads ADD COLUMN updated_at_ms INTEGER")
+        db.execute("ALTER TABLE threads ADD COLUMN created_at_ms INTEGER")
+        db.execute("UPDATE threads SET updated_at = 100, updated_at_ms = 100000, created_at_ms = 90000 WHERE id = 't1'")
+        db.execute(
+            "INSERT INTO threads (id, rollout_path, title, archived, archived_at, updated_at, updated_at_ms, created_at_ms) VALUES ('t2', '', 'Second', 0, NULL, 200, 200000, 190000)"
+        )
+    adapter = SQLiteStorageAdapter(db_path, BackupStore(tmp_path / "backups"))
+
+    assert adapter.codex_thread_sort_key(SessionRef(session_id="local:t1", title="Codex Thread")) == {
+        "status": "ok",
+        "session_id": "t1",
+        "updated_at": 100,
+        "updated_at_ms": 100000,
+        "created_at_ms": 90000,
+    }
+    assert adapter.codex_thread_sort_keys(
+        [SessionRef(session_id="local:t2", title="Second"), SessionRef(session_id="local:t1", title="Codex Thread")]
+    ) == {
+        "status": "ok",
+        "sort_keys": [
+            {"session_id": "t2", "updated_at": 200, "updated_at_ms": 200000, "created_at_ms": 190000},
+            {"session_id": "t1", "updated_at": 100, "updated_at_ms": 100000, "created_at_ms": 90000},
+        ],
+    }
 
 
 def test_delete_unsupported_schema_fails(tmp_path):
