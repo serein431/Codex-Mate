@@ -17,13 +17,19 @@
   const timelineMaxTopPercent = 98;
   const timelineMaxMarkerGapPercent = 3.5;
   const styleId = "codex-delete-style";
-  const codexDeleteStyleVersion = "11";
+  const codexDeleteStyleVersion = "12";
   const codexMateMenuId = "codex-mate-menu";
   const codexDeleteVersion = "6";
   const codexExportVersion = "1";
   const codexProjectMoveVersion = "1";
   const codexActionGroupVersion = "2";
   const codexArchiveDeleteAllVersion = "2";
+  const projectMoveProjectionKey = "codexMateProjectMoveProjection";
+  const projectMoveProjectionTtlMs = 7 * 24 * 60 * 60 * 1000;
+  const projectMoveProjectionSettleMs = 2500;
+  const projectMoveRefreshDelaysMs = [80, 250, 700, 1500, 3000];
+  const chatsSortRefreshIntervalMs = 5000;
+  const chatsSortDbRefreshIntervalMs = 20000;
   const codexMateVersion = window.__CODEX_MATE_VERSION__ || "dev";
   const codexMateSettingsKey = "codexMateSettings";
   const codexMateMenuVersion = "23";
@@ -38,6 +44,15 @@
   const codexThreadScrollListenerVersion = "1";
   const codexThreadScrollRouteHooksVersion = "1";
   const codexThreadScrollUserIntentVersion = "1";
+  const codexProjectMoveRuntimeId = `${Date.now()}-${Math.random()}`;
+  window.__codexProjectMoveRuntimeId = codexProjectMoveRuntimeId;
+  clearTimeout(window.__codexProjectMoveProjectionTimer);
+  window.__codexProjectMoveProjectionTimer = null;
+  clearTimeout(window.__codexProjectMoveChatsSortTimer);
+  window.__codexProjectMoveChatsSortTimer = null;
+  let chatsSortInFlight = false;
+  let chatsSortSignature = "";
+  let chatsSortLastFetchAt = 0;
   clearTimeout(window.__codexMateThreadScrollSaveTimer);
   window.__codexMateThreadScrollSaveTimer = null;
   (window.__codexMateThreadScrollRestoreTimers || []).forEach((timer) => clearTimeout(timer));
@@ -57,6 +72,35 @@
     style.id = styleId;
     style.dataset.codexDeleteStyleVersion = codexDeleteStyleVersion;
     style.textContent = `
+      :root {
+        --codex-mate-action-color: var(--text-secondary, oklch(0.42 0.018 260));
+        --codex-mate-action-hover-color: var(--text-primary, oklch(0.24 0.02 260));
+        --codex-mate-action-hover-bg: color-mix(in srgb, var(--codex-mate-action-hover-color) 11%, transparent);
+        --codex-mate-popover-bg: var(--main-surface-primary, var(--bg-primary, oklch(0.985 0.004 260)));
+        --codex-mate-popover-fg: var(--text-primary, oklch(0.24 0.02 260));
+        --codex-mate-popover-muted: var(--text-secondary, oklch(0.52 0.018 260));
+        --codex-mate-popover-border: color-mix(in srgb, var(--codex-mate-popover-fg) 14%, transparent);
+        --codex-mate-popover-shadow: color-mix(in srgb, var(--codex-mate-popover-fg) 22%, transparent);
+        --codex-mate-success: oklch(0.48 0.14 145);
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --codex-mate-action-color: var(--text-secondary, oklch(0.78 0.014 260));
+          --codex-mate-action-hover-color: var(--text-primary, oklch(0.96 0.006 260));
+          --codex-mate-popover-bg: var(--main-surface-primary, var(--bg-primary, oklch(0.22 0.008 260)));
+          --codex-mate-popover-fg: var(--text-primary, oklch(0.96 0.006 260));
+          --codex-mate-popover-muted: var(--text-secondary, oklch(0.73 0.014 260));
+          --codex-mate-success: oklch(0.72 0.15 150);
+        }
+      }
+      :where(html.dark, body.dark, .dark, [data-theme="dark"], [data-color-mode="dark"]) {
+        --codex-mate-action-color: var(--text-secondary, oklch(0.78 0.014 260));
+        --codex-mate-action-hover-color: var(--text-primary, oklch(0.96 0.006 260));
+        --codex-mate-popover-bg: var(--main-surface-primary, var(--bg-primary, oklch(0.22 0.008 260)));
+        --codex-mate-popover-fg: var(--text-primary, oklch(0.96 0.006 260));
+        --codex-mate-popover-muted: var(--text-secondary, oklch(0.73 0.014 260));
+        --codex-mate-success: oklch(0.72 0.15 150);
+      }
       .${actionGroupClass} {
         position: absolute;
         right: var(--codex-session-actions-right, 28px);
@@ -80,7 +124,7 @@
         border: 0;
         border-radius: 6px;
         background: transparent;
-        color: #d1d5db;
+        color: var(--codex-mate-action-color);
         font: 14px/1 system-ui, sans-serif;
         letter-spacing: 0;
         padding: 0;
@@ -96,8 +140,8 @@
       }
       .${actionButtonClass}:hover,
       .${actionButtonClass}:focus-visible {
-        background: rgba(127, 127, 127, .16);
-        color: #f4f4f5;
+        background: var(--codex-mate-action-hover-bg);
+        color: var(--codex-mate-action-hover-color);
         outline: none;
       }
       [data-codex-delete-row="true"]:hover .${actionGroupClass} { opacity: 1; }
@@ -112,13 +156,13 @@
         position: fixed;
         z-index: 2147483201;
         max-width: min(220px, calc(100vw - 32px));
-        border: 1px solid rgba(255,255,255,.1);
+        border: 1px solid var(--codex-mate-popover-border);
         border-radius: 12px;
-        background: #242628;
-        color: #f4f4f5;
+        background: var(--codex-mate-popover-bg);
+        color: var(--codex-mate-popover-fg);
         font: 14px/20px system-ui, sans-serif;
         padding: 9px 12px;
-        box-shadow: 0 14px 40px rgba(0,0,0,.28);
+        box-shadow: 0 14px 40px var(--codex-mate-popover-shadow);
         pointer-events: none;
         white-space: nowrap;
       }
@@ -136,18 +180,18 @@
         max-width: min(360px, calc(100vw - 24px));
         max-height: min(420px, calc(100vh - 24px));
         overflow: auto;
-        border: 1px solid rgba(255,255,255,.12);
+        border: 1px solid var(--codex-mate-popover-border);
         border-radius: 10px;
-        background: #202124;
-        color: #f4f4f5;
-        box-shadow: 0 20px 50px rgba(0,0,0,.35);
+        background: var(--codex-mate-popover-bg);
+        color: var(--codex-mate-popover-fg);
+        box-shadow: 0 20px 50px var(--codex-mate-popover-shadow);
         padding: 8px;
         font: 13px/18px system-ui, sans-serif;
         letter-spacing: 0;
       }
       .codex-project-move-title {
         padding: 8px 9px 7px;
-        color: #e4e4e7;
+        color: var(--codex-mate-popover-fg);
         font-weight: 600;
       }
       .codex-project-move-item {
@@ -168,7 +212,7 @@
       }
       .codex-project-move-item:hover,
       .codex-project-move-item:focus-visible {
-        background: rgba(127,127,127,.18);
+        background: var(--codex-mate-action-hover-bg);
         outline: none;
       }
       .codex-project-move-label {
@@ -181,16 +225,19 @@
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-        color: #a1a1aa;
+        color: var(--codex-mate-popover-muted);
         font-size: 12px;
       }
       .codex-project-move-current {
-        color: #22c55e;
+        color: var(--codex-mate-success);
         font-size: 12px;
       }
       .codex-project-move-empty {
         padding: 8px 9px;
-        color: #a1a1aa;
+        color: var(--codex-mate-popover-muted);
+      }
+      .codex-project-move-hidden {
+        display: none !important;
       }
       .codex-archive-delete-all {
         border: 1px solid #ef4444;
@@ -275,7 +322,7 @@
         left: auto;
         z-index: 2147483645;
         height: 30px;
-        color: #d1d5db;
+        color: var(--codex-mate-action-color);
         font: 13px system-ui, sans-serif;
         text-align: right;
         pointer-events: auto;
@@ -316,8 +363,8 @@
       }
       .codex-mate-toolbar-button:hover,
       .codex-mate-toolbar-button:focus-visible {
-        background: rgba(127, 127, 127, .12);
-        border-color: rgba(127, 127, 127, .2);
+        background: var(--codex-mate-action-hover-bg);
+        border-color: var(--codex-mate-popover-border);
       }
       .codex-mate-toolbar-button:focus-visible {
         outline: none;
@@ -358,7 +405,7 @@
       .codex-mate-modal-close {
         border: 0;
         background: transparent;
-        color: #d1d5db;
+        color: var(--codex-mate-popover-muted);
         font-size: 20px;
         cursor: default;
       }
@@ -485,8 +532,8 @@
         max-width: min(280px, calc(100vw - 72px));
         border: 1px solid rgba(255,255,255,.12);
         border-radius: 10px;
-        background: #242628;
-        color: #f4f4f5;
+        background: var(--codex-mate-popover-bg);
+        color: var(--codex-mate-popover-fg);
         font: 12px/16px system-ui, sans-serif;
         padding: 7px 9px;
         box-shadow: 0 14px 40px rgba(0,0,0,.28);
@@ -1199,6 +1246,83 @@
     ];
   }
 
+  function readProjectMoveProjection() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(projectMoveProjectionKey) || "{}");
+      const raw = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+      const now = Date.now();
+      const projection = {};
+      Object.entries(raw).forEach(([key, value]) => {
+        if (!value || typeof value !== "object") return;
+        const sessionId = projectMoveSessionKey(value.sessionId || key);
+        if (!sessionId) return;
+        if (typeof value.at === "number" && now - value.at > projectMoveProjectionTtlMs) return;
+        const kind = value.kind === "projectless" || value.targetKind === "projectless" ? "projectless" : "project";
+        const path = String(value.path || value.targetCwd || "");
+        if (kind === "project" && !path) return;
+        projection[sessionId] = {
+          sessionId,
+          kind,
+          label: String(value.label || value.targetLabel || (kind === "projectless" ? "普通对话" : displayProjectName(path))),
+          description: String(value.description || path || "不属于任何项目"),
+          path,
+          normalizedPath: normalizeWorkspacePath(path),
+          sortMs: sortMsForSession(sessionId, value.sortMs || value.updatedAtMs || value.updated_at_ms),
+          sortMsTrusted: value.sortMsTrusted === true,
+          at: typeof value.at === "number" ? value.at : now,
+        };
+      });
+      return projection;
+    } catch {
+      return {};
+    }
+  }
+
+  function writeProjectMoveProjection(projection) {
+    try {
+      localStorage.setItem(projectMoveProjectionKey, JSON.stringify(projection || {}));
+    } catch (error) {
+      window.__codexProjectMoveProjectionFailures = window.__codexProjectMoveProjectionFailures || [];
+      window.__codexProjectMoveProjectionFailures.push(String(error?.stack || error));
+    }
+  }
+
+  function saveProjectMoveProjection(ref, target, sortMs) {
+    const sessionId = projectMoveSessionKey(ref.session_id);
+    if (!sessionId || !target) return;
+    const projection = readProjectMoveProjection();
+    projection[sessionId] = {
+      sessionId,
+      kind: target.kind === "projectless" ? "projectless" : "project",
+      label: target.label || (target.kind === "projectless" ? "普通对话" : displayProjectName(target.path)),
+      description: target.description || target.path || "不属于任何项目",
+      path: target.path || "",
+      normalizedPath: normalizeWorkspacePath(target.path || ""),
+      sortMs: sortMsForSession(ref.session_id, sortMs || target.sortMs),
+      sortMsTrusted: target.sortMsTrusted === true,
+      at: Date.now(),
+    };
+    writeProjectMoveProjection(projection);
+  }
+
+  function clearProjectMoveProjection(ref) {
+    const projection = readProjectMoveProjection();
+    const keys = threadIdVariants(ref.session_id).map(projectMoveSessionKey).filter(Boolean);
+    let changed = false;
+    keys.forEach((key) => {
+      if (Object.prototype.hasOwnProperty.call(projection, key)) {
+        delete projection[key];
+        changed = true;
+      }
+    });
+    if (changed) writeProjectMoveProjection(projection);
+  }
+
+  function projectionForSessionId(sessionId, projection = readProjectMoveProjection()) {
+    const key = projectMoveSessionKey(sessionId);
+    return key ? projection[key] || null : null;
+  }
+
   function rowListItem(row) {
     return row.closest?.('[role="listitem"]') || row;
   }
@@ -1277,8 +1401,49 @@
       || projectMoveInjectedList(projectItem);
   }
 
+  function projectEmptyStateNodes(projectItem) {
+    const emptyLabels = new Set(["暂无对话", "No conversations"]);
+    return Array.from(projectItem?.querySelectorAll?.("div, span") || []).filter((node) => {
+      if (node.closest?.("[data-app-action-sidebar-thread-id], [data-codex-project-move-injected-list='true']")) return false;
+      return emptyLabels.has(String(node.textContent || "").replace(/\s+/g, " ").trim());
+    });
+  }
+
+  function setProjectEmptyStateHidden(projectItem, hidden) {
+    projectEmptyStateNodes(projectItem).forEach((node) => {
+      if (hidden) {
+        node.dataset.codexProjectMoveEmptyHidden = "true";
+        node.classList.add("codex-project-move-hidden");
+      } else if (node.dataset.codexProjectMoveEmptyHidden === "true") {
+        delete node.dataset.codexProjectMoveEmptyHidden;
+        node.classList.remove("codex-project-move-hidden");
+      }
+    });
+  }
+
+  function updateProjectMoveEmptyStates() {
+    document.querySelectorAll('[data-codex-project-move-injected-list="true"]').forEach((list) => {
+      const projectItem = list.closest('[role="listitem"][aria-label], [role="listitem"]');
+      const hasRows = Array.from(list.children).some((child) => !!threadRowFromListItem(child));
+      if (!hasRows) list.remove();
+      if (projectItem) setProjectEmptyStateHidden(projectItem, hasRows || !!projectItem.querySelector("[data-app-action-sidebar-thread-id]"));
+    });
+    document.querySelectorAll('[data-codex-project-move-empty-hidden="true"]').forEach((node) => {
+      const projectItem = node.closest('[role="listitem"][aria-label], [role="listitem"]');
+      if (!projectItem || !projectItem.querySelector("[data-app-action-sidebar-thread-id]")) {
+        delete node.dataset.codexProjectMoveEmptyHidden;
+        node.classList.remove("codex-project-move-hidden");
+      }
+    });
+  }
+
   function rowSortMs(row, ref = sessionRefFromRow(row), target = null) {
     return sortMsForSession(ref.session_id, target?.sortMs || row?.dataset?.codexProjectMoveSortMs || rowListItem(row)?.dataset?.codexProjectMoveSortMs);
+  }
+
+  function rowPinned(row) {
+    return row?.getAttribute?.("data-app-action-sidebar-thread-pinned") === "true"
+      || rowListItem(row)?.getAttribute?.("data-app-action-sidebar-thread-pinned") === "true";
   }
 
   function insertRowItemByTime(list, item, row, target) {
@@ -1286,17 +1451,32 @@
     const sortMs = rowSortMs(row, ref, target);
     item.dataset.codexProjectMoveSortMs = String(sortMs || 0);
     row.dataset.codexProjectMoveSortMs = String(sortMs || 0);
+    const pinned = rowPinned(row);
     const sessionKey = projectMoveSessionKey(ref.session_id);
     const existingItems = Array.from(list.children).filter((child) => child !== item);
+    let firstNonThreadItem = null;
     for (const child of existingItems) {
       const childRow = threadRowFromListItem(child);
-      if (!childRow) continue;
+      if (!childRow) {
+        firstNonThreadItem = firstNonThreadItem || child;
+        continue;
+      }
+      const childPinned = rowPinned(childRow);
+      if (childPinned && !pinned) continue;
+      if (!childPinned && pinned) {
+        list.insertBefore(item, child);
+        return;
+      }
       const childSortMs = rowSortMs(childRow);
       const childKey = projectMoveSessionKey(sessionRefFromRow(childRow).session_id);
       if (sortMs > childSortMs || (sortMs === childSortMs && sessionKey > childKey)) {
         list.insertBefore(item, child);
         return;
       }
+    }
+    if (firstNonThreadItem) {
+      list.insertBefore(item, firstNonThreadItem);
+      return;
     }
     list.appendChild(item);
   }
@@ -1313,6 +1493,7 @@
     item.dataset.codexProjectMoveTargetCwd = target.path;
     row.dataset.codexProjectMoveTargetKind = "project";
     row.dataset.codexProjectMoveTargetCwd = target.path;
+    setProjectEmptyStateHidden(projectItem, true);
     return true;
   }
 
@@ -1326,7 +1507,188 @@
     row.dataset.codexProjectMoveTargetKind = "projectless";
     delete item.dataset.codexProjectMoveTargetCwd;
     delete row.dataset.codexProjectMoveTargetCwd;
+    updateProjectMoveEmptyStates();
     return true;
+  }
+
+  function rowProjectionKind(row) {
+    return row?.dataset?.codexProjectMoveTargetKind || rowListItem(row)?.dataset?.codexProjectMoveTargetKind || "";
+  }
+
+  function clearRowProjectionMarkers(row) {
+    const item = rowListItem(row);
+    delete row.dataset.codexProjectMoveTargetKind;
+    delete row.dataset.codexProjectMoveTargetCwd;
+    delete item.dataset.codexProjectMoveTargetKind;
+    delete item.dataset.codexProjectMoveTargetCwd;
+  }
+
+  function applyProjectMoveProjection() {
+    if (!codexMateSettings().projectMove) return;
+    const projection = readProjectMoveProjection();
+    const rows = sessionRows(true);
+    const targetRowsById = new Map();
+    const settledRefs = [];
+    const now = Date.now();
+    rows.forEach((row) => {
+      const ref = sessionRefFromRow(row);
+      const target = projectionForSessionId(ref.session_id, projection);
+      if (!target) {
+        clearRowProjectionMarkers(row);
+        return;
+      }
+      const rowId = projectMoveSessionKey(ref.session_id);
+      if (rowIsUnderTarget(row, target)) {
+        const existingRow = targetRowsById.get(rowId);
+        if (existingRow && existingRow !== row) {
+          const rowToRemove = rowProjectionKind(existingRow) && !rowProjectionKind(row) ? existingRow : row;
+          rowListItem(rowToRemove).remove();
+          if (rowToRemove === existingRow) targetRowsById.set(rowId, row);
+          return;
+        }
+        targetRowsById.set(rowId, row);
+        if (!rowProjectionKind(row) && typeof target.at === "number" && now - target.at > projectMoveProjectionSettleMs) settledRefs.push(ref);
+      }
+    });
+    rows.forEach((row) => {
+      if (!row.isConnected) return;
+      const ref = sessionRefFromRow(row);
+      const target = projectionForSessionId(ref.session_id, projection);
+      if (!target || rowIsUnderTarget(row, target)) return;
+      const rowId = projectMoveSessionKey(ref.session_id);
+      if (targetRowsById.has(rowId)) {
+        rowListItem(row).remove();
+        return;
+      }
+      const moved = target.kind === "projectless" ? moveRowToChats(row, target) : moveRowToProjectList(row, target);
+      if (moved) targetRowsById.set(rowId, row);
+    });
+    settledRefs.forEach(clearProjectMoveProjection);
+    updateProjectMoveEmptyStates();
+  }
+
+  function scheduleProjectMoveProjection() {
+    if (!codexMateSettings().projectMove || window.__codexProjectMoveProjectionTimer) return;
+    window.__codexProjectMoveProjectionTimer = setTimeout(() => {
+      if (window.__codexProjectMoveRuntimeId !== codexProjectMoveRuntimeId) return;
+      window.__codexProjectMoveProjectionTimer = null;
+      applyProjectMoveProjection();
+    }, 80);
+  }
+
+  function visibleChatsRows() {
+    const list = chatsThreadList();
+    if (!list) return [];
+    return Array.from(list.children).map(threadRowFromListItem).filter(Boolean).filter((row) => rowIsInChats(row));
+  }
+
+  function chatsSortNeedsCorrection(rows) {
+    let previousPinned = true;
+    let previousSortMs = Infinity;
+    let previousKey = "\uffff";
+    for (const row of rows) {
+      const pinned = rowPinned(row);
+      const ref = sessionRefFromRow(row);
+      const sortMs = rowSortMs(row, ref);
+      const key = projectMoveSessionKey(ref.session_id);
+      if (previousPinned && !pinned) {
+        previousPinned = false;
+        previousSortMs = sortMs;
+        previousKey = key;
+        continue;
+      }
+      if (!previousPinned && pinned) return true;
+      if (sortMs > previousSortMs || (sortMs === previousSortMs && key > previousKey)) return true;
+      previousSortMs = sortMs;
+      previousKey = key;
+    }
+    return false;
+  }
+
+  function reorderChatsRows(rows) {
+    const list = chatsThreadList();
+    if (!list || rows.length < 2) return;
+    const rowItems = new Set(rows.map(rowListItem));
+    const firstNonThreadItem = Array.from(list.children).find((child) => !rowItems.has(child) && !threadRowFromListItem(child));
+    const orderedRows = [...rows].sort((left, right) => {
+      const leftPinned = rowPinned(left);
+      const rightPinned = rowPinned(right);
+      if (leftPinned !== rightPinned) return leftPinned ? -1 : 1;
+      const leftRef = sessionRefFromRow(left);
+      const rightRef = sessionRefFromRow(right);
+      const leftSortMs = rowSortMs(left, leftRef);
+      const rightSortMs = rowSortMs(right, rightRef);
+      if (leftSortMs !== rightSortMs) return rightSortMs - leftSortMs;
+      return projectMoveSessionKey(rightRef.session_id).localeCompare(projectMoveSessionKey(leftRef.session_id));
+    });
+    orderedRows.forEach((row) => list.insertBefore(rowListItem(row), firstNonThreadItem || null));
+    cachedSessionRowsAt = 0;
+  }
+
+  async function applyChatsSortCorrection() {
+    if (!codexMateSettings().projectMove || chatsSortInFlight) return;
+    const rows = visibleChatsRows();
+    if (rows.length < 2) return;
+    const refs = rows.map(sessionRefFromRow).filter((ref) => ref.session_id);
+    const signature = refs.map((ref) => projectMoveSessionKey(ref.session_id)).join("|");
+    const allRowsHaveSortMs = rows.every((row) => numericTimestamp(row.dataset.codexProjectMoveSortMs || rowListItem(row).dataset.codexProjectMoveSortMs));
+    const shouldRefreshSortKeys = signature !== chatsSortSignature || !allRowsHaveSortMs || Date.now() - chatsSortLastFetchAt > chatsSortDbRefreshIntervalMs;
+    if (!shouldRefreshSortKeys && !chatsSortNeedsCorrection(rows)) return;
+    chatsSortInFlight = true;
+    try {
+      if (shouldRefreshSortKeys) {
+        const result = await postJson("/thread-sort-keys", { sessions: refs }).catch(() => ({ status: "failed", sort_keys: [] }));
+        chatsSortLastFetchAt = Date.now();
+        const byId = new Map();
+        if (result?.status === "ok" && Array.isArray(result?.sort_keys)) {
+          result.sort_keys.forEach((item) => {
+            const key = projectMoveSessionKey(String(item?.session_id || ""));
+            if (key) byId.set(key, item);
+          });
+        }
+        rows.forEach((row) => {
+          const ref = sessionRefFromRow(row);
+          const payload = byId.get(projectMoveSessionKey(ref.session_id));
+          const sortMs = timestampMsFromPayload(payload) || rowSortMs(row, ref);
+          row.dataset.codexProjectMoveSortMs = String(sortMs || 0);
+          rowListItem(row).dataset.codexProjectMoveSortMs = String(sortMs || 0);
+        });
+      }
+      if (chatsSortNeedsCorrection(rows)) reorderChatsRows(rows);
+      chatsSortSignature = visibleChatsRows().map((row) => projectMoveSessionKey(sessionRefFromRow(row).session_id)).join("|");
+    } finally {
+      chatsSortInFlight = false;
+    }
+  }
+
+  function scheduleChatsSortCorrection(delay = chatsSortRefreshIntervalMs) {
+    if (!codexMateSettings().projectMove) return;
+    if (window.__codexProjectMoveChatsSortTimer) {
+      if (delay !== 0) return;
+      clearTimeout(window.__codexProjectMoveChatsSortTimer);
+      window.__codexProjectMoveChatsSortTimer = null;
+    }
+    window.__codexProjectMoveChatsSortTimer = setTimeout(() => {
+      if (window.__codexProjectMoveRuntimeId !== codexProjectMoveRuntimeId) return;
+      window.__codexProjectMoveChatsSortTimer = null;
+      applyChatsSortCorrection().catch((error) => {
+        window.__codexProjectMoveSortFailures = window.__codexProjectMoveSortFailures || [];
+        window.__codexProjectMoveSortFailures.push(String(error?.stack || error));
+      }).finally(() => {
+        if (codexMateSettings().projectMove) scheduleChatsSortCorrection();
+      });
+    }, delay);
+  }
+
+  function refreshAfterProjectMove() {
+    const refreshVisibleSidebar = () => {
+      if (window.__codexProjectMoveRuntimeId !== codexProjectMoveRuntimeId) return;
+      applyProjectMoveProjection();
+      scheduleChatsSortCorrection(0);
+      syncActionGroupsLayout();
+    };
+    refreshVisibleSidebar();
+    projectMoveRefreshDelaysMs.forEach((delay) => setTimeout(refreshVisibleSidebar, delay));
   }
 
   async function moveSessionToProject(ref, target) {
@@ -1369,7 +1731,9 @@
     try {
       const result = target.kind === "projectless" ? await moveSessionToProjectless(ref) : await moveSessionToProject(ref, target);
       const movedTarget = { ...target, sortMs: timestampMsFromPayload(result), sortMsTrusted: true };
+      saveProjectMoveProjection(ref, movedTarget, movedTarget.sortMs);
       const moved = target.kind === "projectless" ? moveRowToChats(row, movedTarget) : moveRowToProjectList(row, movedTarget);
+      refreshAfterProjectMove();
       const targetLabel = target.kind === "projectless" ? "普通对话" : target.label || displayProjectName(target.path);
       showToast(moved ? `已移动到${targetLabel}` : `已移动到${targetLabel}，刷新侧边栏后显示`, null);
     } catch (error) {
@@ -2509,6 +2873,9 @@
     enablePluginEntry();
     unblockPluginInstallButtons();
     sessionRows().forEach(tryAttachButton);
+    applyProjectMoveProjection();
+    scheduleProjectMoveProjection();
+    scheduleChatsSortCorrection(0);
     syncActionGroupsLayout();
     updateDeleteButtonOffsets();
     archivedPageRows().forEach(attachArchivedPageDeleteButton);
@@ -2535,7 +2902,7 @@
     return !!node?.closest?.(`.codex-delete-toast, .codex-delete-confirm-overlay, .codex-mate-modal-overlay, .${projectMoveOverlayClass}, .${actionTooltipClass}, .${timelineClass}, #codex-mate-menu`);
   }
 
-  const scanRelevantSelector = '[data-app-action-sidebar-thread-id], [data-codex-archive-page-row="true"], [data-codex-archive-delete-all], .app-header-tint, button[aria-label="已归档对话"], button[aria-label="Archived conversations"], button:disabled.w-full.justify-center, [role="button"][aria-disabled="true"].cursor-not-allowed, [data-message-author-role="user"], [data-testid="conversation-turn"]';
+  const scanRelevantSelector = '[data-app-action-sidebar-thread-id], [data-app-action-sidebar-project-row], [data-app-action-sidebar-project-list-id], [data-codex-project-move-injected-list], [data-codex-archive-page-row="true"], [data-codex-archive-delete-all], .app-header-tint, button[aria-label="已归档对话"], button[aria-label="Archived conversations"], button:disabled.w-full.justify-center, [role="button"][aria-disabled="true"].cursor-not-allowed, [data-message-author-role="user"], [data-testid="conversation-turn"]';
 
   function isScanRelevantNode(node) {
     if (node.nodeType !== 1) return false;
