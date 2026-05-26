@@ -438,7 +438,11 @@ def merge_session_index(paths: HistoryPaths) -> dict[str, int]:
     for entry in db_entries:
         entry_id = str(entry["id"])
         existing = existing_by_id.get(entry_id, {})
-        merged.append({**existing, **entry})
+        merged_entry = {**existing, **entry}
+        existing_thread_name = existing.get("thread_name")
+        if isinstance(existing_thread_name, str) and existing_thread_name.strip():
+            merged_entry["thread_name"] = existing_thread_name
+        merged.append(merged_entry)
         seen.add(entry_id)
     for entry in existing_entries:
         entry_id = str(entry["id"])

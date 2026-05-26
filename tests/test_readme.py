@@ -80,6 +80,20 @@ def test_readme_describes_diagnostic_log_bundle():
     assert "会自动脱敏" in text
 
 
+def test_readme_describes_mobile_remote_troubleshooting():
+    text = Path("README.md").read_text(encoding="utf-8")
+
+    assert "### 移动端或 Remote 入口不见了" in text
+    assert '"mobile_remote"' in text
+    assert '"auth_mode": "chatgpt"' in text
+    assert '"remote_feature_flags"' in text
+    assert "requires_openai_auth = true" in text
+    assert "local_remote_dropdown = true" in text
+    assert "remote_feature_*_is_not_true" in text
+    assert "auth_mode_is_not_chatgpt" in text
+    assert "provider_requires_openai_auth_is_not_true" in text
+
+
 def test_readme_describes_one_click_install_script():
     text = Path("README.md").read_text(encoding="utf-8")
 
@@ -104,6 +118,7 @@ def test_readme_includes_english_codex_install_prompt():
     assert "You are helping me install Codex Mate for the local Codex desktop app." in text
     assert "Download the latest release asset for this OS" in text
     assert "Run the installer" in text
+    assert "mobile/remote readiness" in text
     assert "verify that the Codex Mate menu appears" in text
     assert "star the repository for me" in text
     assert "If starring requires a login or confirmation, stop and ask me first." in text

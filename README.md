@@ -82,7 +82,7 @@ Please do the following end to end:
    - Windows: run setup.bat and choose "Install Codex Mate"
    - macOS: run setup.command and choose "Install Codex Mate"
 6. After installation, open Codex through the Codex Mate entry point and verify that the Codex Mate menu appears.
-7. Run the built-in doctor command if available and summarize whether CDP, helper, watcher, and injection look healthy.
+7. Run the built-in doctor command if available and summarize whether CDP, helper, watcher, mobile/remote readiness, and injection look healthy.
 8. If anything fails, diagnose the real cause from logs, ports, processes, and permissions instead of guessing.
 
 After Codex Mate is installed and verified, please open https://github.com/serein431/Codex-Mate and star the repository for me if GitHub is signed in. If starring requires a login or confirmation, stop and ask me first.
@@ -405,6 +405,44 @@ python -m codex_mate doctor --json
 ```text
 --remote-debugging-port=9229
 ```
+
+### 移动端或 Remote 入口不见了
+
+移动端和 Remote 入口属于 Codex 原生功能。Codex Mate 不会删除这些入口；它只通过外部启动和注入增强菜单、插件入口、会话删除、导出、移动和时间线。
+
+如果更新或切换 provider 后这两个入口消失，先运行：
+
+```bash
+python -m codex_mate doctor --json
+```
+
+重点看输出里的 `mobile_remote`：
+
+```json
+{
+  "mobile_remote": {
+    "ready": true,
+    "auth_mode": "chatgpt",
+    "openai_api_key_present": false,
+    "model_provider": "openai",
+    "provider_requires_openai_auth": true,
+    "remote_feature_flags": {
+      "ready": true,
+      "missing": []
+    },
+    "warnings": []
+  }
+}
+```
+
+一般需要同时满足：
+
+- `~/.codex/auth.json` 里 `auth_mode` 是 `chatgpt`
+- `OPENAI_API_KEY` 没有被写成实际 Key
+- 当前 `model_provider` 对应的 provider 配置里有 `requires_openai_auth = true`
+- `~/.codex/config.toml` 的 `[features]` 里启用了原生 Remote 相关开关：`local_remote_dropdown = true`、`cloud_follow_up_local_remote_dropdown = true`、`remote_conversation_apply_diff = true`
+
+Codex Mate 正常启动时会自动补齐这些 Remote 开关，并在修改前备份 `config.toml` 到 `~/.codex/codex_mate_config_backups/`。如果 `warnings` 里出现 `auth_mode_is_not_chatgpt`、`openai_api_key_is_set`、`provider_requires_openai_auth_is_not_true` 或 `remote_feature_*_is_not_true`，说明当前 Codex 运行态还不满足原生移动端或 Remote 入口的显示条件。修复后需要重启 Codex，让新配置进入当前窗口。
 
 ### 双击安装脚本后提示找不到 Python
 

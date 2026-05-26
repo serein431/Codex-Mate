@@ -663,6 +663,7 @@ def test_cli_skips_launcher_cleanup_when_helper_port_is_free(monkeypatch):
 def test_cli_launch_runs_launcher_cleanup_before_injection(monkeypatch):
     events = []
     monkeypatch.setattr(cli, "stop_existing_windows_launchers_if_needed", lambda port: events.append(("cleanup", port)))
+    monkeypatch.setattr(cli, "sync_native_features_before_launch", lambda args: events.append("native-features"))
     monkeypatch.setattr(cli, "sync_history_before_launch", lambda args: events.append("history-sync"))
     monkeypatch.setattr(cli, "launch_and_inject", lambda *args: events.append("launch") or (FakeServer(), None))
     monkeypatch.setattr(cli, "wait_for_shutdown", lambda server, proc: events.append("wait"))
@@ -670,12 +671,13 @@ def test_cli_launch_runs_launcher_cleanup_before_injection(monkeypatch):
     exit_code = cli.main(["launch"])
 
     assert exit_code == 0
-    assert events == [("cleanup", 57321), "history-sync", "launch", "wait"]
+    assert events == [("cleanup", 57321), "native-features", "history-sync", "launch", "wait"]
 
 
 def test_cli_launch_can_skip_history_sync(monkeypatch):
     events = []
     monkeypatch.setattr(cli, "stop_existing_windows_launchers_if_needed", lambda port: events.append(("cleanup", port)))
+    monkeypatch.setattr(cli, "sync_native_features_before_launch", lambda args: events.append("native-features"))
     monkeypatch.setattr(cli, "sync_history_before_launch", lambda args: events.append("history-sync"))
     monkeypatch.setattr(cli, "launch_and_inject", lambda *args: events.append("launch") or (FakeServer(), None))
     monkeypatch.setattr(cli, "wait_for_shutdown", lambda server, proc: events.append("wait"))
@@ -683,12 +685,27 @@ def test_cli_launch_can_skip_history_sync(monkeypatch):
     exit_code = cli.main(["launch", "--no-history-sync"])
 
     assert exit_code == 0
-    assert events == [("cleanup", 57321), "launch", "wait"]
+    assert events == [("cleanup", 57321), "native-features", "launch", "wait"]
+
+
+def test_cli_launch_can_skip_native_feature_sync(monkeypatch):
+    events = []
+    monkeypatch.setattr(cli, "stop_existing_windows_launchers_if_needed", lambda port: events.append(("cleanup", port)))
+    monkeypatch.setattr(cli, "sync_native_features_before_launch", lambda args: events.append("native-features"))
+    monkeypatch.setattr(cli, "sync_history_before_launch", lambda args: events.append("history-sync"))
+    monkeypatch.setattr(cli, "launch_and_inject", lambda *args: events.append("launch") or (FakeServer(), None))
+    monkeypatch.setattr(cli, "wait_for_shutdown", lambda server, proc: events.append("wait"))
+
+    exit_code = cli.main(["launch", "--no-native-feature-sync"])
+
+    assert exit_code == 0
+    assert events == [("cleanup", 57321), "history-sync", "launch", "wait"]
 
 
 def test_cli_launch_checks_update_before_injection(monkeypatch):
     events = []
     monkeypatch.setattr(cli, "stop_existing_windows_launchers_if_needed", lambda port: events.append(("cleanup", port)))
+    monkeypatch.setattr(cli, "sync_native_features_before_launch", lambda args: events.append("native-features"))
     monkeypatch.setattr(cli, "sync_history_before_launch", lambda args: events.append("history-sync"))
     monkeypatch.setattr(cli, "maybe_print_update_notice", lambda: events.append("check-update"))
     monkeypatch.setattr(cli, "launch_and_inject", lambda *args: events.append("launch") or (FakeServer(), None))
@@ -697,7 +714,7 @@ def test_cli_launch_checks_update_before_injection(monkeypatch):
     exit_code = cli.main(["launch"])
 
     assert exit_code == 0
-    assert events == [("cleanup", 57321), "history-sync", "check-update", "launch", "wait"]
+    assert events == [("cleanup", 57321), "native-features", "history-sync", "check-update", "launch", "wait"]
 
 
 def test_cli_update_notice_ignores_network_errors(monkeypatch, capsys):

@@ -17,6 +17,7 @@ from codex_mate import autostart
 from codex_mate import diagnostics
 from codex_mate import doctor
 from codex_mate import history_sync
+from codex_mate import native_features
 from codex_mate import updater
 from codex_mate import watcher
 
@@ -28,6 +29,7 @@ def add_launch_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--debug-port", type=int, default=9229)
     parser.add_argument("--helper-port", type=int, default=57321)
     parser.add_argument("--no-history-sync", action="store_true", help="Skip Codex local history provider/model sync before launch")
+    parser.add_argument("--no-native-feature-sync", action="store_true", help="Skip enabling native Codex mobile/remote feature flags before launch")
 
 
 def add_history_arguments(parser: argparse.ArgumentParser) -> None:
@@ -204,6 +206,8 @@ def stop_existing_windows_launchers_if_needed(helper_port: int) -> None:
 
 def run_launch(args: argparse.Namespace) -> int:
     stop_existing_windows_launchers_if_needed(args.helper_port)
+    if not args.no_native_feature_sync:
+        sync_native_features_before_launch(args)
     if not args.no_history_sync:
         sync_history_before_launch(args)
     maybe_print_update_notice()
@@ -216,6 +220,20 @@ def run_launch(args: argparse.Namespace) -> int:
     print("Keep this terminal open while using the delete buttons. Press Ctrl+C to stop.")
     wait_for_shutdown(server, codex_proc)
     return 0
+
+
+def sync_native_features_before_launch(args: argparse.Namespace) -> None:
+    try:
+        codex_home = args.db.parent if getattr(args, "db", None) else None
+        result = native_features.ensure_remote_feature_flags(codex_home)
+    except Exception as exc:
+        append_launch_warning("native feature sync failed before launch: " + str(exc))
+        print(f"Native feature sync skipped: {exc}")
+        return
+    if result.get("status") != "updated":
+        return
+    updated = ", ".join(str(item) for item in result.get("updated_features", []))
+    print(f"Enabled native Codex remote feature flags: {updated}.")
 
 
 def sync_history_before_launch(args: argparse.Namespace) -> None:

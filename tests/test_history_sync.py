@@ -237,10 +237,48 @@ def test_merge_session_index_uses_updated_at_ms_and_avoids_rewriting_when_unchan
     second = history_sync.merge_session_index(paths)
 
     assert first["updated_session_index"] is True
-    assert json.loads(content)["thread_name"] == "Fresh Title"
+    assert json.loads(content)["thread_name"] == "Stale Title"
     assert json.loads(content)["updated_at"] == "1970-01-01T00:00:01Z"
     assert second["updated_session_index"] is False
     assert (home / "session_index.jsonl").read_text(encoding="utf-8") == content
+
+
+def test_merge_session_index_preserves_existing_thread_name_when_database_title_is_first_message(tmp_path):
+    home = tmp_path / ".codex"
+    write_config(home)
+    conn = sqlite3.connect(home / "state_5.sqlite")
+    try:
+        conn.execute(
+            """
+            CREATE TABLE threads (
+                id TEXT PRIMARY KEY,
+                title TEXT,
+                updated_at_ms INTEGER,
+                archived INTEGER DEFAULT 0,
+                model_provider TEXT,
+                model TEXT
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO threads (id, title, updated_at_ms, archived, model_provider, model) VALUES (?, ?, ?, ?, ?, ?)",
+            ("thread-title", "这是用户说的第一句话，不应该覆盖生成标题", 2000, 0, "current_provider", "gpt-current"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    (home / "session_index.jsonl").write_text(
+        json.dumps({"id": "thread-title", "thread_name": "生成后的会话标题", "updated_at": "1970-01-01T00:00:00Z"}) + "\n",
+        encoding="utf-8",
+    )
+    paths = history_sync.resolve_paths(home)
+
+    result = history_sync.merge_session_index(paths)
+
+    entry = json.loads((home / "session_index.jsonl").read_text(encoding="utf-8"))
+    assert result["updated_session_index"] is True
+    assert entry["thread_name"] == "生成后的会话标题"
+    assert entry["updated_at"] == "1970-01-01T00:00:02Z"
 
 
 def test_merge_session_index_prefers_latest_rollout_timestamp(tmp_path):
@@ -415,7 +453,7 @@ def test_sync_history_if_ready_repairs_stale_index_without_backup_when_profile_m
     write_config(home)
     create_current_threads_db(home)
     (home / "session_index.jsonl").write_text(
-        json.dumps({"id": "current-thread", "thread_name": "Stale", "updated_at": "1970-01-01T00:00:00Z"}) + "\n",
+        json.dumps({"id": "current-thread", "thread_name": "Existing Title", "updated_at": "1970-01-01T00:00:00Z"}) + "\n",
         encoding="utf-8",
     )
     paths = history_sync.resolve_paths(home)
@@ -429,7 +467,7 @@ def test_sync_history_if_ready_repairs_stale_index_without_backup_when_profile_m
     assert not (home / "codex_mate_history_backups").exists()
     index_entries = [json.loads(line) for line in (home / "session_index.jsonl").read_text(encoding="utf-8").splitlines()]
     assert [entry["id"] for entry in index_entries] == ["current-thread", "current-thread-2"]
-    assert index_entries[0]["thread_name"] == "Current Thread"
+    assert index_entries[0]["thread_name"] == "Existing Title"
     assert index_entries[0]["updated_at"] == "1970-01-01T00:01:40Z"
 
 
