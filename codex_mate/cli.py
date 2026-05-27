@@ -37,6 +37,19 @@ def add_history_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--json", action="store_true", help="Emit JSON output")
 
 
+def add_provider_mode_common_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--codex-home", type=Path, default=None, help="Codex data directory; defaults to ~/.codex")
+    parser.add_argument("--json", action="store_true", help="Emit JSON output")
+
+
+def add_provider_mode_profile_arguments(parser: argparse.ArgumentParser) -> None:
+    add_provider_mode_common_arguments(parser)
+    parser.add_argument("--provider", required=True, help="Provider name to write into config.toml")
+    parser.add_argument("--base-url", required=True, help="OpenAI-compatible API base URL")
+    parser.add_argument("--api-key", required=True, help="API key for the provider")
+    parser.add_argument("--wire-api", default="responses", choices=["responses", "chat"], help="Codex provider wire API")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Launch and install Codex Mate for Codex App")
     subparsers = parser.add_subparsers(dest="command")
@@ -83,6 +96,17 @@ def build_parser() -> argparse.ArgumentParser:
     add_history_arguments(history_status_parser)
     history_sync_parser = subparsers.add_parser("history-sync", help="Sync local history to the current provider/model")
     add_history_arguments(history_sync_parser)
+
+    provider_mode_parser = subparsers.add_parser("provider-mode", help="Inspect or switch Codex provider auth mode")
+    provider_mode_subparsers = provider_mode_parser.add_subparsers(dest="provider_mode")
+    provider_mode_status_parser = provider_mode_subparsers.add_parser("status", help="Show current provider auth mode")
+    add_provider_mode_common_arguments(provider_mode_status_parser)
+    provider_mode_official_parser = provider_mode_subparsers.add_parser("official", help="Use official ChatGPT login without API key files")
+    add_provider_mode_common_arguments(provider_mode_official_parser)
+    provider_mode_mixed_parser = provider_mode_subparsers.add_parser("mixed-api", help="Keep ChatGPT login and put the API key in the provider config")
+    add_provider_mode_profile_arguments(provider_mode_mixed_parser)
+    provider_mode_pure_parser = provider_mode_subparsers.add_parser("pure-api", help="Use API key auth.json plus provider config")
+    add_provider_mode_profile_arguments(provider_mode_pure_parser)
 
     add_launch_arguments(parser)
     return parser
@@ -317,6 +341,26 @@ def run_history_sync(args: argparse.Namespace) -> int:
     return 0
 
 
+def run_provider_mode(args: argparse.Namespace) -> int:
+    if args.provider_mode == "status":
+        payload = native_features.provider_mode_status(args.codex_home)
+    elif args.provider_mode == "official":
+        payload = native_features.apply_provider_mode(args.codex_home, mode="official")
+    elif args.provider_mode in {"mixed-api", "pure-api"}:
+        payload = native_features.apply_provider_mode(
+            args.codex_home,
+            mode=args.provider_mode,
+            provider=args.provider,
+            base_url=args.base_url,
+            api_key=args.api_key,
+            wire_api=args.wire_api,
+        )
+    else:
+        raise SystemExit("provider-mode requires one of: status, official, mixed-api, pure-api")
+    print_payload(payload, args.json)
+    return 0
+
+
 def run_logs(args: argparse.Namespace) -> int:
     archive = diagnostics.collect_diagnostics(output_path=args.output)
     print(f"诊断日志已导出: {archive}")
@@ -364,6 +408,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_history_status(args)
     if args.command == "history-sync":
         return run_history_sync(args)
+    if args.command == "provider-mode":
+        return run_provider_mode(args)
     if args.command == "logs":
         return run_logs(args)
     if args.command == "doctor":

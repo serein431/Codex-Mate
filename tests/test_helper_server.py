@@ -38,6 +38,12 @@ class FakeDeleteService:
     def backend_status(self):
         return {"status": "ok", "message": "后端已连接", "version": "v9.9.9"}
 
+    def auth_enhancement_mode_status(self):
+        return {"status": "ok", "auth_enhancement_mode": "loginPreserving"}
+
+    def set_auth_enhancement_mode(self, mode: str):
+        return {"status": "updated", "auth_enhancement_mode": mode}
+
     def move_thread_workspace(self, session: SessionRef, target_cwd: str):
         self.moved.append((session, target_cwd))
         return {"status": "moved", "session_id": session.session_id, "target_cwd": target_cwd}
@@ -130,6 +136,23 @@ def test_helper_server_routes_export_and_backend_status():
     assert exported["filename"] == "First.md"
     assert status["status"] == "ok"
     assert status["message"] == "后端已连接"
+
+
+def test_helper_server_routes_auth_enhancement_mode():
+    service = FakeDeleteService()
+    server = HelperServer("127.0.0.1", 0, service)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base = f"http://127.0.0.1:{server.port}"
+        status = post_json(base + "/auth-enhancement-mode/status", {})
+        updated = post_json(base + "/auth-enhancement-mode/set", {"mode": "forceInject"})
+    finally:
+        server.shutdown()
+        thread.join(timeout=3)
+
+    assert status == {"status": "ok", "auth_enhancement_mode": "loginPreserving"}
+    assert updated == {"status": "updated", "auth_enhancement_mode": "forceInject"}
 
 
 def test_helper_server_routes_session_move_and_sort_keys():

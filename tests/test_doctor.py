@@ -70,3 +70,35 @@ def test_doctor_warns_when_mobile_remote_auth_prerequisites_are_missing(tmp_path
     assert "auth_mode_is_not_chatgpt" in payload["warnings"]
     assert "openai_api_key_is_set" in payload["warnings"]
     assert "provider_requires_openai_auth_is_not_true" in payload["warnings"]
+
+
+def test_doctor_reports_login_preserving_provider_status(tmp_path):
+    (tmp_path / "auth.json").write_text(
+        '{"auth_mode":"chatgpt","tokens":{"refresh_token":"tok"}}\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "config.toml").write_text(
+        'model_provider = "custom"\n'
+        '[model_providers.custom]\n'
+        'name = "custom"\n'
+        'requires_openai_auth = true\n'
+        'base_url = "https://relay.example.test/v1"\n'
+        'experimental_bearer_token = "sk-test"\n'
+        '\n'
+        '[features]\n'
+        'local_remote_dropdown = true\n'
+        'cloud_follow_up_local_remote_dropdown = true\n'
+        'remote_conversation_apply_diff = true\n',
+        encoding="utf-8",
+    )
+
+    payload = doctor.collect_mobile_remote_status(tmp_path)
+
+    login_provider = payload["login_preserving_provider"]
+    assert login_provider["ready"] is True
+    assert login_provider["provider"] == "custom"
+    assert login_provider["chatgpt_login_token_present"] is True
+    assert login_provider["provider_has_bearer_token"] is True
+    assert login_provider["auth_openai_api_key_present"] is False
+    assert payload["provider_mode"]["mode"] == "mixed-api"
+    assert payload["provider_mode"]["provider"] == "custom"

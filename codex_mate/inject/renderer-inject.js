@@ -410,6 +410,78 @@
         cursor: default;
       }
       .codex-mate-modal-body { padding: 8px 20px 20px; }
+      .codex-mate-mode-row {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 10px;
+        padding: 0 0 14px;
+      }
+      .codex-mate-mode-header {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .codex-mate-mode-title { font-weight: 650; }
+      .codex-mate-mode-description { color: #a1a1aa; font-size: 12px; line-height: 1.45; }
+      .codex-mate-mode-status { color: #a1a1aa; font-size: 12px; line-height: 1.45; }
+      .codex-mate-mode-status[data-status="ok"] { color: #34d399; }
+      .codex-mate-mode-status[data-status="failed"] { color: #f87171; }
+      .codex-mate-mode-status[data-status="checking"],
+      .codex-mate-mode-status[data-status="saving"] { color: #fbbf24; }
+      .codex-mate-auth-card {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        gap: 12px;
+        border: 1px solid rgba(255,255,255,.12);
+        border-radius: 10px;
+        background: rgba(255,255,255,.05);
+        padding: 11px 12px;
+      }
+      .codex-mate-auth-summary {
+        color: #f3f4f6;
+        font-size: 13px;
+        font-weight: 650;
+        line-height: 18px;
+      }
+      .codex-mate-auth-detail {
+        margin-top: 3px;
+        color: #a1a1aa;
+        font-size: 12px;
+        line-height: 1.45;
+      }
+      .codex-mate-mode-switch {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 4px;
+        padding: 4px;
+        border: 1px solid rgba(255,255,255,.12);
+        border-radius: 10px;
+        background: rgba(255,255,255,.06);
+      }
+      .codex-mate-mode-option {
+        min-height: 58px;
+        border: 1px solid rgba(255,255,255,.12);
+        border-radius: 7px;
+        background: rgba(255,255,255,.04);
+        color: #d4d4d8;
+        font: 12px system-ui, sans-serif;
+        letter-spacing: 0;
+        cursor: pointer;
+        text-align: left;
+        padding: 8px 10px;
+      }
+      .codex-mate-mode-option strong { display: block; color: #f3f4f6; font-size: 13px; line-height: 18px; }
+      .codex-mate-mode-option span { display: block; margin-top: 2px; color: #a1a1aa; line-height: 16px; }
+      .codex-mate-mode-option[data-active="true"] {
+        border-color: rgba(16,163,127,.72);
+        background: rgba(16,163,127,.18);
+      }
+      .codex-mate-mode-option:disabled {
+        opacity: .62;
+        cursor: default;
+      }
       .codex-mate-row {
         display: flex;
         align-items: center;
@@ -557,6 +629,7 @@
 
   function defaultCodexMateSettings() {
     return {
+      authEnhancementMode: "forceInject",
       pluginEntryUnlock: true,
       forcePluginInstall: true,
       sessionDelete: true,
@@ -568,16 +641,32 @@
     };
   }
 
+  function normalizeCodexMateSettings(settings) {
+    const hasExplicitMode = Object.prototype.hasOwnProperty.call(settings || {}, "authEnhancementMode");
+    const mode = hasExplicitMode
+      ? (settings?.authEnhancementMode === "loginPreserving" ? "loginPreserving" : "forceInject")
+      : (settings?.pluginEntryUnlock === false && settings?.forcePluginInstall === false ? "loginPreserving" : "forceInject");
+    const next = { ...defaultCodexMateSettings(), ...(settings || {}), authEnhancementMode: mode };
+    if (mode === "loginPreserving") {
+      next.pluginEntryUnlock = false;
+      next.forcePluginInstall = false;
+    } else {
+      next.pluginEntryUnlock = true;
+      next.forcePluginInstall = true;
+    }
+    return next;
+  }
+
   function codexMateSettings() {
     try {
-      return { ...defaultCodexMateSettings(), ...JSON.parse(localStorage.getItem(codexMateSettingsKey) || "{}") };
+      return normalizeCodexMateSettings(JSON.parse(localStorage.getItem(codexMateSettingsKey) || "{}"));
     } catch {
       return defaultCodexMateSettings();
     }
   }
 
   function setCodexMateSetting(key, value) {
-    const next = { ...codexMateSettings(), [key]: value };
+    const next = normalizeCodexMateSettings({ ...codexMateSettings(), [key]: value });
     localStorage.setItem(codexMateSettingsKey, JSON.stringify(next));
     if (key === "threadScrollRestore" && !value) {
       clearTimeout(window.__codexMateThreadScrollSaveTimer);
@@ -587,6 +676,93 @@
       window.__codexMateThreadScrollRuntime = null;
     }
     renderCodexMateMenu();
+    scan();
+  }
+
+  function applyCodexMateAuthMode(mode) {
+    const normalized = mode === "loginPreserving" ? "loginPreserving" : mode === "forceInject" ? "forceInject" : "";
+    if (!normalized) return false;
+    const next = normalizeCodexMateSettings({ ...codexMateSettings(), authEnhancementMode: normalized });
+    localStorage.setItem(codexMateSettingsKey, JSON.stringify(next));
+    return true;
+  }
+
+  function applyCodexMateAuthModePayload(payload) {
+    return applyCodexMateAuthMode(payload?.auth_enhancement_mode || payload?.authEnhancementMode);
+  }
+
+  let codexMateAuthModeStatus = { status: "checking", message: "正在读取增强模式…" };
+  let codexMateAuthModePayload = null;
+
+  function renderAuthModeStatus() {
+    const status = codexMateAuthModeStatus.status || "ok";
+    const payload = codexMateAuthModePayload || {};
+    const loginReady = payload.login_preserving_available === true || payload.provider_mode?.chatgpt_login_token_present === true;
+    const currentMode = codexMateSettings().authEnhancementMode;
+    document.querySelectorAll("[data-codex-mate-auth-mode-status]").forEach((node) => {
+      node.dataset.status = status;
+      node.textContent = codexMateAuthModeStatus.message || (status === "ok" ? "增强模式已同步" : "增强模式未同步");
+    });
+    document.querySelectorAll("[data-codex-mate-auth-summary]").forEach((node) => {
+      node.textContent = payload.summary || (status === "checking" ? "正在检测 ChatGPT 登录" : "未检测到 ChatGPT 登录");
+    });
+    document.querySelectorAll("[data-codex-mate-auth-detail]").forEach((node) => {
+      node.textContent = payload.detail || "Codex Mate 会先确认本机是否有 ChatGPT 登录态，再决定是否可以启用保留登录态。";
+    });
+    document.querySelectorAll("[data-codex-mate-auth-mode]").forEach((button) => {
+      const mode = button.getAttribute("data-codex-mate-auth-mode");
+      const waiting = status === "checking" || status === "saving";
+      button.disabled = waiting || (mode === "loginPreserving" && !loginReady);
+      button.dataset.active = String(mode === currentMode);
+      button.setAttribute(
+        "title",
+        mode === "loginPreserving" && !loginReady
+          ? "请先在 Codex 中登录 ChatGPT，然后重新检测。"
+          : mode === "loginPreserving"
+            ? "启用保留登录态的推荐模式。"
+            : "临时启用前端强制注入。"
+      );
+    });
+    document.querySelectorAll("[data-codex-mate-refresh-auth]").forEach((button) => {
+      button.disabled = status === "checking" || status === "saving";
+    });
+  }
+
+  async function checkCodexMateAuthModeStatus() {
+    codexMateAuthModeStatus = { status: "checking", message: "正在读取增强模式…" };
+    renderAuthModeStatus();
+    try {
+      const result = await withTimeout(postJson("/auth-enhancement-mode/status", {}), 2500, "增强模式读取超时");
+      codexMateAuthModePayload = result || null;
+      if (result?.status === "failed" || !applyCodexMateAuthModePayload(result)) {
+        throw new Error(result?.message || "增强模式读取失败");
+      }
+      codexMateAuthModeStatus = { status: "ok", message: result.message || "增强模式已同步" };
+    } catch (error) {
+      codexMateAuthModeStatus = { status: "failed", message: bridgeErrorMessage(error, "增强模式读取失败") };
+    }
+    renderCodexMateMenu();
+    renderAuthModeStatus();
+  }
+
+  async function setCodexMateAuthMode(mode) {
+    if (mode !== "loginPreserving" && mode !== "forceInject") return;
+    codexMateAuthModeStatus = { status: "saving", message: "正在切换增强模式…" };
+    renderAuthModeStatus();
+    try {
+      const result = await withTimeout(postJson("/auth-enhancement-mode/set", { mode }), 8000, "增强模式切换超时");
+      codexMateAuthModePayload = result || null;
+      if (result?.status === "failed" || !applyCodexMateAuthModePayload(result)) {
+        throw new Error(result?.message || "增强模式切换失败");
+      }
+      codexMateAuthModeStatus = { status: "ok", message: result.message || "增强模式已切换" };
+      showToast(result.message || "增强模式已切换", null);
+    } catch (error) {
+      codexMateAuthModeStatus = { status: "failed", message: bridgeErrorMessage(error, "增强模式切换失败") };
+      showToast(codexMateAuthModeStatus.message, null);
+    }
+    renderCodexMateMenu();
+    renderAuthModeStatus();
     scan();
   }
 
@@ -684,9 +860,13 @@
   }
 
   function renderCodexMateMenu() {
+    const settings = codexMateSettings();
     document.querySelectorAll(".codex-mate-toggle[data-codex-mate-setting]").forEach((button) => {
       const key = button.getAttribute("data-codex-mate-setting");
-      button.dataset.enabled = String(!!codexMateSettings()[key]);
+      button.dataset.enabled = String(!!settings[key]);
+    });
+    document.querySelectorAll("[data-codex-mate-auth-mode]").forEach((button) => {
+      button.dataset.active = String(button.getAttribute("data-codex-mate-auth-mode") === settings.authEnhancementMode);
     });
   }
 
@@ -702,13 +882,24 @@
           <button type="button" class="codex-mate-modal-close" aria-label="关闭">×</button>
         </div>
         <div class="codex-mate-modal-body">
-          <div class="codex-mate-row">
-            <div><div class="codex-mate-row-title">插件选项解锁</div><div class="codex-mate-row-description">让 API Key 模式显示并启用插件入口。</div></div>
-            <button type="button" class="codex-mate-toggle" data-codex-mate-setting="pluginEntryUnlock"><span></span></button>
-          </div>
-          <div class="codex-mate-row">
-            <div><div class="codex-mate-row-title">特殊插件强制安装</div><div class="codex-mate-row-description">解除 App unavailable / 应用不可用导致的前端安装禁用。</div></div>
-            <button type="button" class="codex-mate-toggle" data-codex-mate-setting="forcePluginInstall"><span></span></button>
+          <div class="codex-mate-mode-row">
+            <div class="codex-mate-mode-header">
+              <div class="codex-mate-mode-title">增强模式</div>
+              <div class="codex-mate-mode-description">先检测 ChatGPT 登录态，再给出推荐操作。</div>
+            </div>
+            <div class="codex-mate-auth-card">
+              <div>
+                <div class="codex-mate-row-title">当前检测</div>
+                <div class="codex-mate-auth-summary" data-codex-mate-auth-summary="true">正在检测 ChatGPT 登录</div>
+                <div class="codex-mate-auth-detail" data-codex-mate-auth-detail="true">Codex Mate 会先确认本机是否有 ChatGPT 登录态，再决定是否可以启用保留登录态。</div>
+              </div>
+              <button type="button" class="codex-mate-action-button" data-codex-mate-refresh-auth="true">我已登录，重新检测</button>
+            </div>
+            <div class="codex-mate-mode-switch" role="group" aria-label="增强模式">
+              <button type="button" class="codex-mate-mode-option" data-codex-mate-auth-mode="loginPreserving"><strong>启用推荐模式</strong><span>保持登录态，移动端、Remote 和原生入口优先可用。</span></button>
+              <button type="button" class="codex-mate-mode-option" data-codex-mate-auth-mode="forceInject"><strong>临时启用强制注入</strong><span>不改登录文件，只由前端接管插件入口。</span></button>
+            </div>
+            <div class="codex-mate-mode-status" data-codex-mate-auth-mode-status="true" data-status="checking">正在读取增强模式…</div>
           </div>
           <div class="codex-mate-row">
             <div><div class="codex-mate-row-title">会话删除</div><div class="codex-mate-row-description">在会话列表悬停显示删除按钮，并支持撤销。</div></div>
@@ -781,6 +972,16 @@
         void checkBackendStatus();
         return;
       }
+      const refreshAuthButton = closestElement(event.target, "[data-codex-mate-refresh-auth]");
+      if (refreshAuthButton) {
+        void checkCodexMateAuthModeStatus();
+        return;
+      }
+      const authModeButton = closestElement(event.target, "[data-codex-mate-auth-mode]");
+      if (authModeButton) {
+        void setCodexMateAuthMode(authModeButton.getAttribute("data-codex-mate-auth-mode"));
+        return;
+      }
       const toggle = closestElement(event.target, "[data-codex-mate-setting]");
       if (!toggle) return;
       const key = toggle.getAttribute("data-codex-mate-setting");
@@ -788,7 +989,9 @@
     }, true);
     document.body.appendChild(overlay);
     renderCodexMateMenu();
+    renderAuthModeStatus();
     renderBackendStatus();
+    void checkCodexMateAuthModeStatus();
     void checkBackendStatus();
   }
 
@@ -816,15 +1019,12 @@
   }
 
   function removeDuplicateCodexMateMenus(keep) {
-    const legacyMenuId = "codex-" + "plus-menu";
-    const legacyMenuAttribute = "data-codex-" + "plus-menu";
-    const legacyMenuName = "Codex" + "++";
-    document.querySelectorAll(`#${codexMateMenuId}, [data-codex-mate-menu="true"], #${legacyMenuId}, [${legacyMenuAttribute}="true"]`).forEach((node) => {
+    document.querySelectorAll(`#${codexMateMenuId}, [data-codex-mate-menu="true"]`).forEach((node) => {
       if (node !== keep) node.remove();
     });
     Array.from(document.querySelectorAll("button")).forEach((button) => {
       const label = (button.textContent || "").trim();
-      if ((label.startsWith("Codex Mate") || label.startsWith(legacyMenuName)) && !button.closest(`#${codexMateMenuId}`)) {
+      if (label.startsWith("Codex Mate") && !button.closest(`#${codexMateMenuId}`)) {
         button.remove();
       }
     });
@@ -992,6 +1192,7 @@
   }
 
   function enablePluginEntry() {
+    if (codexMateAuthModeStatus.status === "checking" || codexMateAuthModeStatus.status === "saving") return;
     if (!codexMateSettings().pluginEntryUnlock) return;
     const pluginButton = pluginEntryButton();
     if (!pluginButton) return;
@@ -1044,6 +1245,7 @@
   }
 
   function unblockPluginInstallButtons() {
+    if (codexMateAuthModeStatus.status === "checking" || codexMateAuthModeStatus.status === "saving") return;
     if (!codexMateSettings().forcePluginInstall) return;
     pluginInstallCandidates().forEach((button) => {
       const text = installButtonLabel(button);
@@ -1113,19 +1315,20 @@
 
   async function postJson(path, payload) {
     if (!window.__codexMateBridge) {
-      if (path === "/backend/status") {
-        try {
-          const response = await fetch(`${helperBase}${path}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload || {}),
-          });
-          return await response.json();
-        } catch (_) {
-          return { status: "failed", message: "未连接" };
+      try {
+        const response = await fetch(`${helperBase}${path}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload || {}),
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          return { status: "failed", message: result?.message || result?.error || "请求失败" };
         }
+        return result;
+      } catch (_) {
+        return { status: "failed", message: path === "/backend/status" ? "未连接" : "Codex Mate 后端未连接，请重启启动器" };
       }
-      return { status: "failed", message: "Codex Mate 桥接不可用，请重启启动器" };
     }
     return await window.__codexMateBridge(path, payload);
   }
@@ -2944,7 +3147,9 @@
     window.__codexMateScanTimer = setTimeout(runScheduledScan, 200);
   }
 
+  const initialAuthModeStatusCheck = checkCodexMateAuthModeStatus();
   scan();
+  void initialAuthModeStatusCheck.finally(scan);
   window.__codexMateObserver?.disconnect();
   window.__codexMateObserver = new MutationObserver(scheduleScan);
   window.__codexMateObserver.observe(document.body || document.documentElement, { childList: true, subtree: true });

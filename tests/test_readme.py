@@ -1,12 +1,6 @@
 from pathlib import Path
 
 
-LEGACY_BRAND = "Codex" + "++"
-LEGACY_OWNER = "Big" + "Pizza" + "V3"
-LEGACY_PROJECT = "Codex" + "Plus" + "Plus"
-LEGACY_BUNDLE_SUFFIX = "codex" + "plus" + "plus"
-
-
 def test_readme_limits_discussion_group_qr_size():
     text = Path("README.md").read_text(encoding="utf-8")
 
@@ -23,6 +17,8 @@ def test_readme_includes_codex_mate_icon_and_toc():
     assert '<img src="docs/images/codex-mate.png"' in text
     assert 'width="220"' in text
     assert "## 目录" in text
+    assert "- [2.0 更新重点](#20-更新重点)" in text
+    assert "- [推荐使用路径](#推荐使用路径)" in text
     assert "- [下载哪个包](#下载哪个包)" in text
     assert "- [Codex 自助安装 Prompt](#codex-自助安装-prompt)" in text
     assert "- [Windows 安装](#windows-安装)" in text
@@ -31,6 +27,8 @@ def test_readme_includes_codex_mate_icon_and_toc():
     assert "- [macOS 打开](#macos-打开)" in text
     assert "- [常见问题](#常见问题)" in text
     assert "- [诊断日志](#诊断日志)" in text
+    assert "- [命令行速查](#命令行速查)" in text
+    assert "- [数据与备份位置](#数据与备份位置)" in text
 
 
     text = Path("README.md").read_text(encoding="utf-8")
@@ -40,9 +38,25 @@ def test_readme_includes_codex_mate_icon_and_toc():
     assert "docs/images/linux-do.png" not in text
 
 
+def test_readme_describes_2_0_user_path_and_storage_locations():
+    text = Path("README.md").read_text(encoding="utf-8")
+
+    assert "## 2.0 更新重点" in text
+    assert "状态驱动的增强模式面板" in text
+    assert "没检测到 ChatGPT token 时，不会把“保持登录态”写成已启用" in text
+    assert "## 推荐使用路径" in text
+    assert "点“启用推荐模式”" in text
+    assert "临时启用强制注入" in text
+    assert "## 命令行速查" in text
+    assert "python -m codex_mate launch --no-native-feature-sync" in text
+    assert "## 数据与备份位置" in text
+    assert "~/.codex-mate/settings.json" in text
+    assert "~/.codex/codex_mate_auth_backups/" in text
+    assert "~/.codex/sessions/**/rollout-*.jsonl" in text
+
+
 def test_readme_describes_transparent_takeover_mode():
     text = Path("README.md").read_text(encoding="utf-8")
-    main_text = text.split("## 致谢", 1)[0]
 
     assert "透明接管" in text
     assert "LaunchAgent" in text
@@ -50,10 +64,6 @@ def test_readme_describes_transparent_takeover_mode():
     assert "python -m codex_mate watch-disable" in text
     assert "Windows 默认推荐使用 `Codex Mate.lnk`" in text
     assert "python -m codex_mate doctor --json" in text
-    assert LEGACY_BRAND not in main_text
-    assert LEGACY_OWNER not in main_text
-    assert LEGACY_PROJECT not in main_text
-    assert LEGACY_BUNDLE_SUFFIX not in main_text
 
 
 def test_readme_describes_history_sync_commands():
@@ -84,9 +94,24 @@ def test_readme_describes_mobile_remote_troubleshooting():
     text = Path("README.md").read_text(encoding="utf-8")
 
     assert "### 移动端或 Remote 入口不见了" in text
+    assert "### Provider 模式" in text
+    assert "顶部的“增强模式”会先显示当前检测结果" in text
+    assert "~/.codex-mate/settings.json" in text
+    assert "保持登录态" in text
+    assert "强制注入" in text
+    assert "我已登录，重新检测" in text
+    assert "未检测到 ChatGPT 登录" in text
     assert '"mobile_remote"' in text
+    assert '"login_preserving_provider"' in text
+    assert '"provider_mode"' in text
+    assert '"mode": "mixed-api"' in text
     assert '"auth_mode": "chatgpt"' in text
     assert '"remote_feature_flags"' in text
+    assert "python -m codex_mate provider-mode status --json" in text
+    assert "python -m codex_mate provider-mode official" in text
+    assert "python -m codex_mate provider-mode mixed-api" in text
+    assert "python -m codex_mate provider-mode pure-api" in text
+    assert "experimental_bearer_token" in text
     assert "requires_openai_auth = true" in text
     assert "local_remote_dropdown = true" in text
     assert "remote_feature_*_is_not_true" in text
@@ -155,5 +180,4 @@ def test_readme_thanks_related_projects_at_end():
     text = Path("README.md").read_text(encoding="utf-8")
 
     assert "## 致谢" in text
-    assert "https://github.com/BigPizzaV3/CodexPlusPlus" in text
     assert "https://github.com/GODGOD126/codex-history-sync-tool" in text

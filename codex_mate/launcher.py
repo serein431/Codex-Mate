@@ -18,7 +18,7 @@ from codex_mate.helper_server import HelperServer
 from codex_mate.markdown_export import MarkdownExportService
 from codex_mate.models import DeleteResult, DeleteStatus, SessionRef
 from codex_mate.storage_adapter import SQLiteStorageAdapter
-from codex_mate import __version__, runtime, updater
+from codex_mate import __version__, native_features, runtime, updater
 
 
 class ApiFirstDeleteService:
@@ -137,6 +137,12 @@ class ApiFirstDeleteService:
 
     def backend_status(self) -> dict[str, object]:
         return {"status": "ok", "message": "后端已连接", "version": __version__}
+
+    def auth_enhancement_mode_status(self) -> dict[str, object]:
+        return native_features.auth_enhancement_mode_status()
+
+    def set_auth_enhancement_mode(self, mode: str) -> dict[str, object]:
+        return native_features.set_auth_enhancement_mode(mode=mode)
 
     def move_thread_workspace(self, session: SessionRef, target_cwd: str) -> dict[str, object]:
         if self.local_adapter is None:
@@ -568,4 +574,8 @@ def handle_bridge_request(service: ApiFirstDeleteService, path: str, payload: di
         return service.thread_sort_keys(sessions)
     if path == "/backend/status":
         return service.backend_status()
+    if path == "/auth-enhancement-mode/status":
+        return service.auth_enhancement_mode_status()
+    if path == "/auth-enhancement-mode/set":
+        return service.set_auth_enhancement_mode(str(payload.get("mode", "")))
     return {"status": DeleteStatus.FAILED.value, "session_id": str(payload.get("session_id", "")), "message": "Unknown bridge path"}

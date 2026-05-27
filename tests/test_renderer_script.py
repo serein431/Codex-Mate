@@ -132,7 +132,7 @@ def test_renderer_script_debounces_mutation_observer_scan():
     assert "new MutationObserver(scheduleScan)" in text
     assert "new MutationObserver(scan)" not in text
     assert "scan();" in text
-    assert "  scan();\n  window.__codexMateObserver" in text
+    assert "  scan();\n  void initialAuthModeStatusCheck.finally(scan);\n  window.__codexMateObserver" in text
 
 
 def test_renderer_script_ignores_chat_content_mutations_before_scheduling_scan():
@@ -428,8 +428,28 @@ def test_renderer_script_does_not_include_fast_mode_patch():
     assert "提出问题" in text
     assert "https://github.com/serein431/Codex-Mate/issues" in text
     assert "window.open(issueUrl, \"_blank\")" in text
-    assert "插件选项解锁" in text
-    assert "特殊插件强制安装" in text
+    assert "增强模式" in text
+    assert "保持登录态" in text
+    assert "强制注入" in text
+    assert "当前检测" in text
+    assert "未检测到 ChatGPT 登录" in text
+    assert "我已登录，重新检测" in text
+    assert "启用推荐模式" in text
+    assert "临时启用强制注入" in text
+    assert "data-codex-mate-auth-summary" in text
+    assert "data-codex-mate-auth-detail" in text
+    assert "data-codex-mate-auth-mode" in text
+    assert "authEnhancementMode" in text
+    assert "setCodexMateAuthMode" in text
+    assert "checkCodexMateAuthModeStatus" in text
+    assert 'postJson("/auth-enhancement-mode/status", {})' in text
+    assert 'postJson("/auth-enhancement-mode/set", { mode })' in text
+    assert "data-codex-mate-auth-mode-status" in text
+    assert "initialAuthModeStatusCheck.finally(scan)" in text
+    assert 'codexMateAuthModeStatus.status === "checking"' in text
+    assert "normalizeCodexMateSettings" in text
+    assert '"loginPreserving"' in text
+    assert '"forceInject"' in text
     assert "会话删除" in text
     assert "Markdown 导出" in text
     assert "对话时间线" in text
@@ -466,11 +486,7 @@ def test_renderer_script_does_not_include_fast_mode_patch():
     assert "nativeButtonClass" in text
     assert "removeDuplicateCodexMateMenus" in text
     assert "data-codex-mate-menu" in text
-    assert 'const legacyMenuId = "codex-" + "plus-menu"' in text
-    assert 'const legacyMenuAttribute = "data-codex-" + "plus-menu"' in text
-    assert 'const legacyMenuName = "Codex" + "++"' in text
     assert "label.startsWith(\"Codex Mate\")" in text
-    assert "label.startsWith(legacyMenuName)" in text
     assert "codexMateMenuVersion = \"23\"" in text
     assert "codexMateTriggerInstalled = \"23\"" in text
     assert "codexMateFileButtonVersion" not in text

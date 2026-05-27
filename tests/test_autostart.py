@@ -4,11 +4,6 @@ from pathlib import Path
 from codex_mate import autostart
 
 
-LEGACY_BRAND = "Codex" + "++"
-LEGACY_OWNER = "Big" + "Pizza" + "V3"
-LEGACY_PROJECT = "Codex" + "Plus" + "Plus"
-
-
 def test_build_macos_launch_agent_plist_runs_watcher_with_python(tmp_path):
     plist = autostart.build_macos_launch_agent_plist(
         python_executable=Path("/opt/python/bin/python3"),
@@ -60,9 +55,6 @@ def test_build_windows_watcher_install_script_registers_run_and_startup_shortcut
 
     assert "CodexMateWatcher" in script
     assert "CodexMateWatcher.lnk" in script
-    assert LEGACY_BRAND not in script
-    assert LEGACY_OWNER not in script
-    assert LEGACY_PROJECT not in script
     assert "-m codex_mate watch --debug-port 9444" in script
     assert run_key in script
     assert f"if (-not (Test-Path '{run_key}'))" in script

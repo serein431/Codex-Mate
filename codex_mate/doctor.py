@@ -95,6 +95,9 @@ def collect_mobile_remote_status(codex_home: Path | None = None) -> dict[str, An
         "model_provider": model_provider,
         "provider_requires_openai_auth": requires_auth,
         "remote_feature_flags": remote_features,
+        "login_preserving_provider": native_features.login_preserving_provider_status(home),
+        "provider_mode": native_features.provider_mode_status(home),
+        "auth_enhancement_mode": native_features.auth_enhancement_mode_status(home),
         "warnings": warnings,
     }
 

@@ -61,6 +61,37 @@ def test_update_service_reports_available_release(monkeypatch, tmp_path):
     assert payload["asset_name"] == "CodexMate.zip"
 
 
+def test_service_reports_auth_enhancement_mode(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(
+        launcher.native_features,
+        "auth_enhancement_mode_status",
+        lambda codex_home=None: calls.append(codex_home) or {"status": "ok", "auth_enhancement_mode": "loginPreserving"},
+    )
+    service = launcher.ApiFirstDeleteService(launcher.UnavailableApiAdapter(), None, tmp_path)
+
+    payload = service.auth_enhancement_mode_status()
+
+    assert payload["auth_enhancement_mode"] == "loginPreserving"
+    assert calls == [None]
+
+
+def test_service_sets_auth_enhancement_mode(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(
+        launcher.native_features,
+        "set_auth_enhancement_mode",
+        lambda codex_home=None, *, mode: calls.append((codex_home, mode)) or {"status": "updated", "auth_enhancement_mode": mode},
+    )
+    service = launcher.ApiFirstDeleteService(launcher.UnavailableApiAdapter(), None, tmp_path)
+
+    payload = service.set_auth_enhancement_mode("forceInject")
+
+    assert payload["status"] == "updated"
+    assert payload["auth_enhancement_mode"] == "forceInject"
+    assert calls == [(None, "forceInject")]
+
+
 def test_update_service_runs_one_click_update(monkeypatch, tmp_path):
     release = updater.Release(
         version="v9.9.9",
@@ -194,6 +225,21 @@ def test_bridge_routes_export_and_backend_status(tmp_path):
 
     assert exported == {"status": "exported", "session_id": "s1"}
     assert status == {"status": "ok"}
+
+
+def test_bridge_routes_auth_enhancement_mode(tmp_path):
+    class Service:
+        def auth_enhancement_mode_status(self):
+            return {"status": "ok", "auth_enhancement_mode": "loginPreserving"}
+
+        def set_auth_enhancement_mode(self, mode):
+            return {"status": "updated", "auth_enhancement_mode": mode}
+
+    status = launcher.handle_bridge_request(Service(), "/auth-enhancement-mode/status", {})
+    updated = launcher.handle_bridge_request(Service(), "/auth-enhancement-mode/set", {"mode": "forceInject"})
+
+    assert status == {"status": "ok", "auth_enhancement_mode": "loginPreserving"}
+    assert updated == {"status": "updated", "auth_enhancement_mode": "forceInject"}
 
 
 def test_bridge_routes_session_move_and_sort_keys(tmp_path):
@@ -871,6 +917,58 @@ def test_cli_history_sync_prints_json(monkeypatch, tmp_path, capsys):
     assert exit_code == 0
     assert calls == [tmp_path]
     assert '"updated_database_rows": 2' in capsys.readouterr().out
+
+
+def test_cli_provider_mode_status_prints_json(monkeypatch, tmp_path, capsys):
+    calls = []
+    monkeypatch.setattr(cli.native_features, "provider_mode_status", lambda codex_home: calls.append(codex_home) or {"mode": "mixed-api"})
+
+    exit_code = cli.main(["provider-mode", "status", "--codex-home", str(tmp_path), "--json"])
+
+    assert exit_code == 0
+    assert calls == [tmp_path]
+    assert '"mode": "mixed-api"' in capsys.readouterr().out
+
+
+def test_cli_provider_mode_mixed_api_applies_explicit_profile(monkeypatch, tmp_path, capsys):
+    calls = []
+
+    def fake_apply(codex_home, **kwargs):
+        calls.append((codex_home, kwargs))
+        return {"status": "updated", "mode": kwargs["mode"], "provider": kwargs["provider"]}
+
+    monkeypatch.setattr(cli.native_features, "apply_provider_mode", fake_apply)
+
+    exit_code = cli.main(
+        [
+            "provider-mode",
+            "mixed-api",
+            "--codex-home",
+            str(tmp_path),
+            "--provider",
+            "custom",
+            "--base-url",
+            "https://relay.example.test/v1",
+            "--api-key",
+            "sk-new",
+            "--json",
+        ]
+    )
+
+    assert exit_code == 0
+    assert calls == [
+        (
+            tmp_path,
+            {
+                "mode": "mixed-api",
+                "provider": "custom",
+                "base_url": "https://relay.example.test/v1",
+                "api_key": "sk-new",
+                "wire_api": "responses",
+            },
+        )
+    ]
+    assert '"mode": "mixed-api"' in capsys.readouterr().out
 
 
 def test_cli_logs_command_exports_diagnostic_bundle(monkeypatch, tmp_path, capsys):
