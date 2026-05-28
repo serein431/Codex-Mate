@@ -144,6 +144,12 @@ class ApiFirstDeleteService:
     def set_auth_enhancement_mode(self, mode: str) -> dict[str, object]:
         return native_features.set_auth_enhancement_mode(mode=mode)
 
+    def provider_profile_status(self) -> dict[str, object]:
+        return native_features.provider_profile_status()
+
+    def apply_provider_profile(self, profile: dict[str, object]) -> dict[str, object]:
+        return native_features.apply_provider_profile(profile=profile)
+
     def move_thread_workspace(self, session: SessionRef, target_cwd: str) -> dict[str, object]:
         if self.local_adapter is None:
             return {"status": "failed", "session_id": session.session_id, "message": "No local database configured"}
@@ -523,7 +529,8 @@ def launch_and_inject(app_dir: Path | None, db_path: Path | None, backup_dir: Pa
     server = start_helper(service, port=helper_port)
     codex_proc = None
     try:
-        codex_proc = launch_codex_app(resolved_app_dir, debug_port)
+        if not cdp_port_ready(debug_port):
+            codex_proc = launch_codex_app(resolved_app_dir, debug_port)
         script_path = Path(__file__).parent / "inject" / "renderer-inject.js"
         server.bridge_socket = inject_with_retry(debug_port, script_path, server.port, service)
         return server, codex_proc
@@ -578,4 +585,10 @@ def handle_bridge_request(service: ApiFirstDeleteService, path: str, payload: di
         return service.auth_enhancement_mode_status()
     if path == "/auth-enhancement-mode/set":
         return service.set_auth_enhancement_mode(str(payload.get("mode", "")))
+    if path == "/provider-profile/status":
+        return service.provider_profile_status()
+    if path == "/provider-profile/apply":
+        raw_profile = payload.get("profile", {})
+        profile = raw_profile if isinstance(raw_profile, dict) else {}
+        return service.apply_provider_profile(profile)
     return {"status": DeleteStatus.FAILED.value, "session_id": str(payload.get("session_id", "")), "message": "Unknown bridge path"}

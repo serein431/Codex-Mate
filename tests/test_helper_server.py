@@ -44,6 +44,12 @@ class FakeDeleteService:
     def set_auth_enhancement_mode(self, mode: str):
         return {"status": "updated", "auth_enhancement_mode": mode}
 
+    def provider_profile_status(self):
+        return {"status": "ok", "profile": {"mode": "mixed-api", "api_key_present": True}}
+
+    def apply_provider_profile(self, profile: dict[str, object]):
+        return {"status": "updated", "profile": profile, "auth_enhancement_mode": "loginPreserving"}
+
     def move_thread_workspace(self, session: SessionRef, target_cwd: str):
         self.moved.append((session, target_cwd))
         return {"status": "moved", "session_id": session.session_id, "target_cwd": target_cwd}
@@ -153,6 +159,37 @@ def test_helper_server_routes_auth_enhancement_mode():
 
     assert status == {"status": "ok", "auth_enhancement_mode": "loginPreserving"}
     assert updated == {"status": "updated", "auth_enhancement_mode": "forceInject"}
+
+
+def test_helper_server_routes_provider_profile():
+    service = FakeDeleteService()
+    server = HelperServer("127.0.0.1", 0, service)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base = f"http://127.0.0.1:{server.port}"
+        status = post_json(base + "/provider-profile/status", {})
+        applied = post_json(
+            base + "/provider-profile/apply",
+            {
+                "profile": {
+                    "mode": "mixed-api",
+                    "provider": "jmrai",
+                    "base_url": "https://jmrai.example/v1",
+                    "api_key": "sk-new",
+                    "model": "gpt-5.5",
+                    "wire_api": "responses",
+                }
+            },
+        )
+    finally:
+        server.shutdown()
+        thread.join(timeout=3)
+
+    assert status["profile"]["mode"] == "mixed-api"
+    assert applied["status"] == "updated"
+    assert applied["profile"]["provider"] == "jmrai"
+    assert applied["auth_enhancement_mode"] == "loginPreserving"
 
 
 def test_helper_server_routes_session_move_and_sort_keys():

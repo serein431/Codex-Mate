@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import json
-import os
 import threading
-import uuid
 from pathlib import Path
 from typing import Callable
 
@@ -52,6 +50,7 @@ def evaluate_script(websocket_url: str, script: str) -> dict[str, object]:
 
 
 def build_bridge_script(binding_name: str) -> str:
+    binding_key = json.dumps(binding_name)
     return f"""
 (() => {{
   window.__codexMateCallbacks = new Map();
@@ -70,24 +69,36 @@ def build_bridge_script(binding_name: str) -> str:
   }};
   window.__codexMateBridge = (path, payload) => new Promise((resolve) => {{
     const id = String(++window.__codexMateSeq);
+    const binding = window[{binding_key}];
+    if (typeof binding !== "function") {{
+      resolve({{ status: "failed", message: "bridge binding unavailable" }});
+      return;
+    }}
     window.__codexMateCallbacks.set(id, {{ resolve }});
-    window.{binding_name}(JSON.stringify({{ id, path, payload }}));
+    try {{
+      binding(JSON.stringify({{ id, path, payload }}));
+    }} catch (error) {{
+      window.__codexMateCallbacks.delete(id);
+      resolve({{ status: "failed", message: error?.message || "bridge binding failed" }});
+    }}
   }});
 }})();
 """
 
 
 def make_bridge_binding_name() -> str:
-    return f"{BRIDGE_BINDING_NAME}_{os.getpid()}_{uuid.uuid4().hex}"
+    return BRIDGE_BINDING_NAME
 
 
 def install_bridge(websocket_url: str, binding_name: str, handler: BridgeHandler) -> websocket.WebSocket:
     ws = websocket.create_connection(websocket_url, timeout=5)
-    ws.send(json.dumps({"id": 1, "method": "Runtime.addBinding", "params": {"name": binding_name}}))
-    _wait_for_id(ws, 1)
+    ws.send(json.dumps({"id": 1, "method": "Runtime.removeBinding", "params": {"name": binding_name}}))
+    _wait_for_id(ws, 1, allow_error=True)
+    ws.send(json.dumps({"id": 2, "method": "Runtime.addBinding", "params": {"name": binding_name}}))
+    _wait_for_id(ws, 2)
     script = build_bridge_script(binding_name)
-    add_script_to_new_document(ws, 2, script)
-    runtime_evaluate(ws, 3, script)
+    add_script_to_new_document(ws, 3, script)
+    runtime_evaluate(ws, 4, script)
     thread = threading.Thread(target=_bridge_loop, args=(ws, handler), daemon=True)
     thread.start()
     return ws
@@ -164,11 +175,13 @@ def runtime_evaluate(ws: websocket.WebSocket, message_id: int, script: str) -> d
     return _wait_for_id(ws, message_id)
 
 
-def _wait_for_id(ws: websocket.WebSocket, message_id: int) -> dict[str, object]:
+def _wait_for_id(ws: websocket.WebSocket, message_id: int, allow_error: bool = False) -> dict[str, object]:
     while True:
         message = json.loads(ws.recv())
         if message.get("id") == message_id:
             if "error" in message:
+                if allow_error:
+                    return message
                 raise RuntimeError(str(message["error"]))
             return message
 

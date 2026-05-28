@@ -215,7 +215,7 @@ def test_renderer_script_sidebar_delete_opens_on_pointerup_when_click_is_unrelia
 
     text = Path("codex_mate/inject/renderer-inject.js").read_text(encoding="utf-8")
     assert "updateDeleteButtonOffsets" in text
-    assert "codexDeleteStyleVersion = \"12\"" in text
+    assert "codexDeleteStyleVersion = \"13\"" in text
     assert "right: max(66px, var(--codex-session-actions-right, 28px))" in text
     assert "确认" in text
     assert "归档对话" in text
@@ -228,16 +228,45 @@ def test_renderer_script_uses_theme_adaptive_sidebar_action_colors():
 
     assert "--codex-mate-action-color" in text
     assert "--codex-mate-action-hover-color" in text
+    assert "--codex-mate-action-hover-bg" in text
     assert "--codex-mate-popover-bg" in text
     assert "--codex-mate-popover-fg" in text
     assert "--codex-mate-popover-muted" in text
+    assert "--codex-mate-control-bg" in text
+    assert "--codex-mate-card-bg" in text
+    assert "--codex-mate-input-bg" in text
     assert "prefers-color-scheme: dark" in text
+    assert "html.electron-light" in text
+    assert "html.electron-dark" in text
     assert '[data-theme="dark"]' in text
+    assert "--codex-mate-popover-bg: var(--main-surface-primary" not in text
+    assert "--codex-mate-popover-bg: var(--bg-primary" not in text
     assert "color: var(--codex-mate-action-color)" in text
     assert "background: var(--codex-mate-action-hover-bg)" in text
     assert "color: var(--codex-mate-popover-muted)" in text
     assert "background: var(--codex-mate-popover-bg)" in text
     assert "color: var(--codex-mate-popover-fg)" in text
+
+
+def test_renderer_script_uses_theme_adaptive_modal_colors():
+    text = Path("codex_mate/inject/renderer-inject.js").read_text(encoding="utf-8")
+    start = text.index(".codex-mate-modal-content")
+    end = text.index(".codex-mate-row", start)
+    modal_css = text[start:end]
+
+    assert "color-scheme: light" in modal_css
+    assert "background: var(--codex-mate-popover-bg)" in modal_css
+    assert "color: var(--codex-mate-popover-fg)" in modal_css
+    assert "border: 1px solid var(--codex-mate-popover-border)" in modal_css
+    assert "color: var(--codex-mate-popover-muted)" in modal_css
+    assert "background: var(--codex-mate-card-bg)" in modal_css
+    assert "background: var(--codex-mate-control-bg)" in modal_css
+    assert "background: var(--codex-mate-input-bg)" in modal_css
+    assert "color: var(--codex-mate-input-fg)" in modal_css
+    assert "border: 1px solid var(--codex-mate-input-border)" in modal_css
+    assert "rgba(255,255,255,.12)" not in modal_css
+    assert "background: #2b2b2b" not in modal_css
+    assert "color: #f3f4f6" not in modal_css
 
 
     text = Path("codex_mate/inject/renderer-inject.js").read_text(encoding="utf-8")
@@ -394,6 +423,20 @@ def test_renderer_script_adds_backend_status_contract():
     assert "function checkBackendStatus" in text
     assert 'postJson("/backend/status", {})' in text
     assert "后端已连接" in text
+    assert "function httpPostJson(path, payload)" in text
+    assert "Codex Mate bridge timeout" in text
+    assert "return await httpPostJson(path, payload)" in text
+
+
+def test_renderer_script_keeps_codex_mate_modal_contained_and_closable():
+    text = Path("codex_mate/inject/renderer-inject.js").read_text(encoding="utf-8")
+
+    assert "max-height: min(760px, calc(100vh - 32px))" in text
+    assert "overflow: hidden" in text
+    assert "overflow-y: auto" in text
+    assert "overlay.querySelector(\".codex-mate-modal-close\")?.addEventListener(\"click\"" in text
+    assert "overlay.addEventListener(\"keydown\"" in text
+    assert "event.key === \"Escape\"" in text
 
 
 def test_renderer_script_delegated_clicks_tolerate_text_targets():
@@ -434,8 +477,21 @@ def test_renderer_script_does_not_include_fast_mode_patch():
     assert "当前检测" in text
     assert "未检测到 ChatGPT 登录" in text
     assert "我已登录，重新检测" in text
+    assert 'button.textContent = waiting ? "正在检测…" : loginReady ? "重新检测" : "我已登录，重新检测"' in text
     assert "启用推荐模式" in text
     assert "临时启用强制注入" in text
+    assert "供应商配置" in text
+    assert "保留登录态 + API" in text
+    assert "纯 API" in text
+    assert "官方登录" in text
+    assert "data-codex-mate-provider-mode" in text
+    assert "data-codex-mate-provider-field" in text
+    assert "data-codex-mate-provider-apply" in text
+    assert "data-codex-mate-provider-status" in text
+    assert "checkCodexMateProviderProfileStatus" in text
+    assert "applyCodexMateProviderProfile" in text
+    assert 'postJson("/provider-profile/status", {})' in text
+    assert 'postJson("/provider-profile/apply", { profile })' in text
     assert "data-codex-mate-auth-summary" in text
     assert "data-codex-mate-auth-detail" in text
     assert "data-codex-mate-auth-mode" in text

@@ -92,6 +92,39 @@ def test_service_sets_auth_enhancement_mode(monkeypatch, tmp_path):
     assert calls == [(None, "forceInject")]
 
 
+def test_service_reports_provider_profile(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setattr(
+        launcher.native_features,
+        "provider_profile_status",
+        lambda codex_home=None: calls.append(codex_home) or {"status": "ok", "profile": {"mode": "mixed-api"}},
+    )
+    service = launcher.ApiFirstDeleteService(launcher.UnavailableApiAdapter(), None, tmp_path)
+
+    payload = service.provider_profile_status()
+
+    assert payload["profile"]["mode"] == "mixed-api"
+    assert calls == [None]
+
+
+def test_service_applies_provider_profile(monkeypatch, tmp_path):
+    calls = []
+
+    def fake_apply(codex_home=None, *, profile):
+        calls.append((codex_home, profile))
+        return {"status": "updated", "profile": profile, "auth_enhancement_mode": "loginPreserving"}
+
+    monkeypatch.setattr(launcher.native_features, "apply_provider_profile", fake_apply)
+    service = launcher.ApiFirstDeleteService(launcher.UnavailableApiAdapter(), None, tmp_path)
+
+    profile = {"mode": "mixed-api", "provider": "jmrai", "base_url": "https://jmrai.example/v1", "api_key": "sk-new"}
+    payload = service.apply_provider_profile(profile)
+
+    assert payload["status"] == "updated"
+    assert payload["profile"]["provider"] == "jmrai"
+    assert calls == [(None, profile)]
+
+
 def test_update_service_runs_one_click_update(monkeypatch, tmp_path):
     release = updater.Release(
         version="v9.9.9",
@@ -240,6 +273,22 @@ def test_bridge_routes_auth_enhancement_mode(tmp_path):
 
     assert status == {"status": "ok", "auth_enhancement_mode": "loginPreserving"}
     assert updated == {"status": "updated", "auth_enhancement_mode": "forceInject"}
+
+
+def test_bridge_routes_provider_profile(tmp_path):
+    class Service:
+        def provider_profile_status(self):
+            return {"status": "ok", "profile": {"mode": "mixed-api"}}
+
+        def apply_provider_profile(self, profile):
+            return {"status": "updated", "profile": profile}
+
+    profile = {"mode": "mixed-api", "provider": "jmrai", "base_url": "https://jmrai.example/v1", "api_key": "sk-new"}
+    status = launcher.handle_bridge_request(Service(), "/provider-profile/status", {})
+    applied = launcher.handle_bridge_request(Service(), "/provider-profile/apply", {"profile": profile})
+
+    assert status == {"status": "ok", "profile": {"mode": "mixed-api"}}
+    assert applied == {"status": "updated", "profile": profile}
 
 
 def test_bridge_routes_session_move_and_sort_keys(tmp_path):
@@ -559,6 +608,7 @@ def test_launch_retries_injection_until_codex_page_is_ready(monkeypatch, tmp_pat
     attempts = []
     monkeypatch.setattr(launcher, "resolve_codex_app_dir", lambda app_dir=None: tmp_path)
     monkeypatch.setattr(launcher, "prepare_windows_codex_relaunch", lambda debug_port: None)
+    monkeypatch.setattr(launcher, "cdp_port_ready", lambda debug_port: False)
     monkeypatch.setattr(launcher, "start_helper", lambda *args, **kwargs: FakeServer())
     monkeypatch.setattr(launcher, "launch_codex_app", lambda *args: None)
 
@@ -588,6 +638,7 @@ def test_inject_with_retry_reports_friendly_cdp_failure(monkeypatch, tmp_path):
 def test_launch_and_inject_returns_windows_packaged_process_id(monkeypatch, tmp_path):
     monkeypatch.setattr(launcher, "resolve_codex_app_dir", lambda app_dir=None: tmp_path)
     monkeypatch.setattr(launcher, "prepare_windows_codex_relaunch", lambda debug_port: None)
+    monkeypatch.setattr(launcher, "cdp_port_ready", lambda debug_port: False)
     monkeypatch.setattr(launcher, "start_helper", lambda *args, **kwargs: FakeServer())
     monkeypatch.setattr(launcher, "launch_codex_app", lambda *args: 1234)
     monkeypatch.setattr(launcher, "inject_with_retry", lambda *args, **kwargs: {"result": {}})
@@ -602,6 +653,7 @@ def test_launch_and_inject_closes_helper_when_injection_fails(monkeypatch, tmp_p
     server = FakeServer()
     monkeypatch.setattr(launcher, "resolve_codex_app_dir", lambda app_dir=None: tmp_path)
     monkeypatch.setattr(launcher, "prepare_windows_codex_relaunch", lambda debug_port: None)
+    monkeypatch.setattr(launcher, "cdp_port_ready", lambda debug_port: False)
     monkeypatch.setattr(launcher, "start_helper", lambda *args, **kwargs: server)
     monkeypatch.setattr(launcher, "launch_codex_app", lambda *args: 1234)
     monkeypatch.setattr(launcher, "inject_with_retry", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("inject failed")))
@@ -621,6 +673,7 @@ def test_launch_and_inject_leaves_codex_running_when_injection_fails(monkeypatch
     monkeypatch.setattr(launcher.sys, "platform", "win32")
     monkeypatch.setattr(launcher, "resolve_codex_app_dir", lambda app_dir=None: tmp_path)
     monkeypatch.setattr(launcher, "prepare_windows_codex_relaunch", lambda debug_port: None)
+    monkeypatch.setattr(launcher, "cdp_port_ready", lambda debug_port: False)
     monkeypatch.setattr(launcher, "start_helper", lambda *args, **kwargs: FakeServer())
     monkeypatch.setattr(launcher, "launch_codex_app", lambda *args: 1234)
     monkeypatch.setattr(launcher, "inject_with_retry", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("inject failed")))
@@ -642,6 +695,7 @@ def test_launch_uses_resolved_app_dir(monkeypatch, tmp_path):
     executable.write_text("#!/bin/sh\n", encoding="utf-8")
     monkeypatch.setattr(launcher, "resolve_codex_app_dir", lambda app_dir=None: mac_app)
     monkeypatch.setattr(launcher, "prepare_windows_codex_relaunch", lambda debug_port: None)
+    monkeypatch.setattr(launcher, "cdp_port_ready", lambda debug_port: False)
     monkeypatch.setattr(launcher, "start_helper", lambda *args, **kwargs: FakeServer())
     monkeypatch.setattr(launcher.subprocess, "run", lambda args, **kw: launched.append(args))
     monkeypatch.setattr(launcher, "inject_with_retry", lambda *args, **kwargs: {"result": {}})
@@ -651,6 +705,22 @@ def test_launch_uses_resolved_app_dir(monkeypatch, tmp_path):
     open_calls = [call for call in launched if call and call[0] == "open"]
     assert len(open_calls) == 1
     assert str(executable) not in open_calls[0]
+
+
+def test_launch_and_inject_attaches_without_reopening_when_cdp_is_already_ready(monkeypatch, tmp_path):
+    launched = []
+    monkeypatch.setattr(launcher, "resolve_codex_app_dir", lambda app_dir=None: tmp_path)
+    monkeypatch.setattr(launcher, "prepare_windows_codex_relaunch", lambda debug_port: None)
+    monkeypatch.setattr(launcher, "cdp_port_ready", lambda debug_port: True)
+    monkeypatch.setattr(launcher, "start_helper", lambda *args, **kwargs: FakeServer())
+    monkeypatch.setattr(launcher, "launch_codex_app", lambda *args: launched.append(args) or 1234)
+    monkeypatch.setattr(launcher, "inject_with_retry", lambda *args, **kwargs: {"result": {}})
+
+    server, proc = launcher.launch_and_inject(None, None, tmp_path / "backups", 9229, 57321)
+
+    assert server.port == 57321
+    assert proc is None
+    assert launched == []
 
 
 def test_cli_stops_existing_windows_launchers_before_launch(monkeypatch):
@@ -964,6 +1034,7 @@ def test_cli_provider_mode_mixed_api_applies_explicit_profile(monkeypatch, tmp_p
                 "provider": "custom",
                 "base_url": "https://relay.example.test/v1",
                 "api_key": "sk-new",
+                "model": "",
                 "wire_api": "responses",
             },
         )

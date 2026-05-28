@@ -17,6 +17,14 @@ REMOTE_FEATURE_FLAGS = (
 LOGIN_TOKEN_KEYS = ("access_token", "id_token", "refresh_token")
 PROVIDER_MODES = ("official", "mixed-api", "pure-api")
 AUTH_ENHANCEMENT_MODES = ("loginPreserving", "forceInject")
+PROVIDER_PROFILE_DEFAULTS = {
+    "mode": "mixed-api",
+    "provider": "codex-mate",
+    "base_url": "",
+    "api_key": "",
+    "model": "",
+    "wire_api": "responses",
+}
 AUTH_ENHANCEMENT_MODE_ALIASES = {
     "loginpreserving": "loginPreserving",
     "login-preserving": "loginPreserving",
@@ -131,7 +139,11 @@ def ensure_remote_feature_flags(codex_home: str | Path | None = None) -> dict[st
     }
 
 
-def ensure_login_preserving_provider(codex_home: str | Path | None = None) -> dict[str, object]:
+def ensure_login_preserving_provider(
+    codex_home: str | Path | None = None,
+    *,
+    settings_home: str | Path | None = None,
+) -> dict[str, object]:
     config_path = config_path_for(codex_home)
     auth_path = config_path.parent / "auth.json"
     auth = read_json_object(auth_path)
@@ -163,26 +175,30 @@ def ensure_login_preserving_provider(codex_home: str | Path | None = None) -> di
         }
 
     provider = provider_config(config, provider_name)
+    saved_profile = saved_provider_profile_for(settings_home, provider_name)
     if provider is None:
-        return {
-            "status": "skipped",
-            "reason": "model provider config missing",
-            "config_path": str(config_path),
-            "auth_path": str(auth_path),
-            "provider": provider_name,
-        }
+        if not saved_profile:
+            return {
+                "status": "skipped",
+                "reason": "model provider config missing",
+                "config_path": str(config_path),
+                "auth_path": str(auth_path),
+                "provider": provider_name,
+            }
+        provider = {}
 
     api_key = first_non_empty_string(
         auth.get("OPENAI_API_KEY") if auth else None,
         config.get("OPENAI_API_KEY"),
         provider.get("experimental_bearer_token"),
         provider.get("api_key"),
+        saved_profile_string(saved_profile, "api_key", "apiKey"),
     )
-    base_url = first_non_empty_string(provider.get("base_url"))
+    base_url = first_non_empty_string(provider.get("base_url"), saved_profile_string(saved_profile, "base_url", "baseUrl"))
     if not api_key:
         return {
             "status": "skipped",
-            "reason": "provider api key not found",
+            "reason": "provider api key missing",
             "config_path": str(config_path),
             "auth_path": str(auth_path),
             "provider": provider_name,
@@ -200,15 +216,16 @@ def ensure_login_preserving_provider(codex_home: str | Path | None = None) -> di
     updated_config = set_login_preserving_provider_in_toml(
         config_text,
         provider_name=provider_name,
-        provider_title=first_non_empty_string(provider.get("name")) or provider_name,
+        provider_title=first_non_empty_string(provider.get("name"), saved_profile_string(saved_profile, "provider")) or provider_name,
         base_url=base_url,
         api_key=api_key,
-        wire_api=first_non_empty_string(provider.get("wire_api")) or "responses",
+        wire_api=first_non_empty_string(provider.get("wire_api"), saved_profile_string(saved_profile, "wire_api", "wireApi")) or "responses",
+        model=first_non_empty_string(config.get("model"), saved_profile_string(saved_profile, "model")),
     )
-    auth_updated = dict(auth or {})
-    auth_removed_key = auth_updated.pop("OPENAI_API_KEY", None) is not None
+    auth_updated = without_openai_api_key(auth)
+    auth_changed = auth_updated != dict(auth or {})
     config_changed = updated_config != config_text
-    if not config_changed and not auth_removed_key:
+    if not config_changed and not auth_changed:
         return {
             "status": "skipped",
             "reason": "login-preserving provider already enabled",
@@ -218,10 +235,10 @@ def ensure_login_preserving_provider(codex_home: str | Path | None = None) -> di
         }
 
     config_backup_path = backup_config(config_path, "login-preserving-provider") if config_changed else None
-    auth_backup_path = backup_auth(auth_path) if auth_removed_key else None
+    auth_backup_path = backup_auth(auth_path) if auth_changed and auth_path.exists() else None
     if config_changed:
         config_path.write_text(updated_config, encoding="utf-8")
-    if auth_removed_key:
+    if auth_changed:
         auth_path.write_text(json.dumps(auth_updated, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return {
         "status": "updated",
@@ -345,6 +362,12 @@ def auth_enhancement_message(mode: str, provider_status: dict[str, object], prov
         return "保持登录态已启用：已关闭前端强制注入，移动端、Remote 和原生入口优先走 Codex 登录态。"
     if action_reason == "chatgpt login token not found":
         return "已关闭前端强制注入；当前未检测到 ChatGPT 登录态，请先在 Codex 登录后再切换 provider。"
+    if action_reason == "provider api key missing":
+        return "推荐模式未启用：当前 provider 缺少 API Key。请在供应商配置里填写 API Key 后点击切换供应商。"
+    if action_reason == "provider base_url not found":
+        return "推荐模式未启用：当前 provider 缺少 Base URL。请在供应商配置里补全 Base URL 后点击切换供应商。"
+    if action_reason == "model provider config missing":
+        return "推荐模式未启用：当前 provider 配置不完整。请在供应商配置里补全后点击切换供应商。"
     if action_reason:
         return f"已关闭前端强制注入；当前 provider 暂未自动迁移：{action_reason}。"
     return "保持登录态已启用：已关闭前端强制注入。"
@@ -375,16 +398,21 @@ def read_codex_mate_settings(settings_home: str | Path | None = None) -> dict[st
     return dict(settings or {})
 
 
-def write_codex_mate_auth_enhancement_mode(settings_home: str | Path | None, mode: str) -> bool:
+def write_codex_mate_settings(settings_home: str | Path | None, settings: dict[str, Any]) -> bool:
     settings_path = settings_path_for(settings_home)
+    current = read_codex_mate_settings(settings_home)
+    if settings == current:
+        return False
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    settings_path.write_text(json.dumps(settings, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return True
+
+
+def write_codex_mate_auth_enhancement_mode(settings_home: str | Path | None, mode: str) -> bool:
     settings = read_codex_mate_settings(settings_home)
     next_settings = dict(settings)
     next_settings["auth_enhancement_mode"] = mode
-    if next_settings == settings:
-        return False
-    settings_path.parent.mkdir(parents=True, exist_ok=True)
-    settings_path.write_text(json.dumps(next_settings, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    return True
+    return write_codex_mate_settings(settings_home, next_settings)
 
 
 def auth_enhancement_mode_status(
@@ -440,7 +468,16 @@ def set_auth_enhancement_mode(
         if before_provider.get("mode") in ("official", "mixed-api"):
             provider_action = {"status": "skipped", "reason": "provider already preserves login"}
         else:
-            provider_action = ensure_login_preserving_provider(codex_home)
+            provider_action = ensure_login_preserving_provider(codex_home, settings_home=settings_home)
+            if provider_action.get("status") != "updated":
+                status = auth_enhancement_mode_status(codex_home, settings_home=settings_home)
+                return {
+                    **status,
+                    "status": "failed",
+                    "provider_mode": before_provider,
+                    "provider_action": provider_action,
+                    "message": auth_enhancement_message(normalized, before_provider, provider_action),
+                }
 
     settings_changed = write_codex_mate_auth_enhancement_mode(settings_home, normalized)
     status = auth_enhancement_mode_status(codex_home, settings_home=settings_home)
@@ -455,6 +492,171 @@ def set_auth_enhancement_mode(
     }
 
 
+def provider_profile_status(
+    codex_home: str | Path | None = None,
+    *,
+    settings_home: str | Path | None = None,
+) -> dict[str, object]:
+    settings = read_codex_mate_settings(settings_home)
+    profile = normalized_provider_profile(settings.get("provider_profile"), infer_provider_profile(codex_home))
+    provider_status = provider_mode_status(codex_home)
+    status = auth_enhancement_mode_status(codex_home, settings_home=settings_home)
+    return {
+        "status": "ok",
+        "settings_path": str(settings_path_for(settings_home)),
+        "profile": sanitized_provider_profile(profile),
+        "provider_mode": provider_status,
+        "auth_enhancement_mode": status["auth_enhancement_mode"],
+        "recommended_mode": "loginPreserving" if profile["mode"] in ("official", "mixed-api") else "forceInject",
+        "message": provider_profile_message(profile, provider_status),
+    }
+
+
+def apply_provider_profile(
+    codex_home: str | Path | None = None,
+    *,
+    settings_home: str | Path | None = None,
+    profile: dict[str, object],
+) -> dict[str, object]:
+    settings = read_codex_mate_settings(settings_home)
+    previous = settings.get("provider_profile") if isinstance(settings.get("provider_profile"), dict) else infer_provider_profile(codex_home)
+    normalized = normalized_provider_profile(profile, previous)
+    mode = normalized["mode"]
+
+    settings_with_profile = dict(settings)
+    settings_with_profile["provider_profile"] = normalized
+    write_codex_mate_settings(settings_home, settings_with_profile)
+
+    action = apply_provider_mode(
+        codex_home,
+        mode=mode,
+        provider=normalized["provider"],
+        base_url=normalized["base_url"],
+        api_key=normalized["api_key"],
+        wire_api=normalized["wire_api"],
+        model=normalized["model"],
+    )
+    action_failed = action.get("reason") == "chatgpt login token not found" or action.get("status") == "failed"
+    target_auth_mode = "forceInject" if mode == "pure-api" else "loginPreserving"
+    if not action_failed:
+        write_codex_mate_auth_enhancement_mode(settings_home, target_auth_mode)
+
+    status = auth_enhancement_mode_status(codex_home, settings_home=settings_home)
+    provider_status = provider_mode_status(codex_home)
+    overall_status = "failed" if action_failed else ("updated" if action.get("status") == "updated" else "skipped")
+    message = provider_profile_apply_message(normalized, action, action_failed)
+    if not action_failed and target_auth_mode == "loginPreserving" and status["auth_enhancement_mode"] != "loginPreserving":
+        message = "供应商配置已保存；当前未检测到 ChatGPT 登录态，登录后可启用保留登录态。"
+    return {
+        **status,
+        "status": overall_status,
+        "profile": sanitized_provider_profile(normalized),
+        "provider_action": action,
+        "provider_mode": provider_status,
+        "auth_enhancement_mode": status["auth_enhancement_mode"],
+        "message": message,
+    }
+
+
+def normalized_provider_profile(profile: object, previous: object | None = None) -> dict[str, str]:
+    previous_profile = previous if isinstance(previous, dict) else {}
+    raw_profile = profile if isinstance(profile, dict) else {}
+    merged = {**PROVIDER_PROFILE_DEFAULTS, **{str(k): v for k, v in previous_profile.items()}, **{str(k): v for k, v in raw_profile.items()}}
+    mode = str(merged.get("mode") or "").strip().lower()
+    if mode not in PROVIDER_MODES:
+        raise ValueError(f"unsupported provider profile mode: {mode}")
+
+    provider = str(merged.get("provider") or "").strip() or PROVIDER_PROFILE_DEFAULTS["provider"]
+    base_url = str(merged.get("base_url") or merged.get("baseUrl") or "").strip()
+    input_api_key = str(raw_profile.get("api_key") or raw_profile.get("apiKey") or "").strip()
+    previous_api_key = str(previous_profile.get("api_key") or previous_profile.get("apiKey") or "").strip()
+    api_key = input_api_key or previous_api_key
+    model = str(merged.get("model") or "").strip()
+    wire_api = str(merged.get("wire_api") or merged.get("wireApi") or "responses").strip().lower() or "responses"
+    if wire_api not in ("responses", "chat"):
+        wire_api = "responses"
+
+    if mode != "official":
+        if not provider:
+            raise ValueError("provider is required")
+        if not base_url:
+            raise ValueError("base_url is required")
+        if not api_key:
+            raise ValueError("api_key is required")
+
+    return {
+        "mode": mode,
+        "provider": provider,
+        "base_url": base_url,
+        "api_key": api_key,
+        "model": model,
+        "wire_api": wire_api,
+    }
+
+
+def sanitized_provider_profile(profile: dict[str, str]) -> dict[str, object]:
+    return {
+        "mode": profile["mode"],
+        "provider": profile["provider"],
+        "base_url": profile["base_url"],
+        "model": profile["model"],
+        "wire_api": profile["wire_api"],
+        "api_key_present": bool(profile["api_key"]),
+    }
+
+
+def infer_provider_profile(codex_home: str | Path | None = None) -> dict[str, str]:
+    config_path = config_path_for(codex_home)
+    auth_path = config_path.parent / "auth.json"
+    config = read_config(config_path) or {}
+    auth = read_json_object(auth_path) or {}
+    provider_status = provider_mode_status(codex_home)
+    mode = str(provider_status.get("mode") or "")
+    if mode not in PROVIDER_MODES:
+        mode = "mixed-api" if provider_status.get("chatgpt_login_token_present") else "pure-api"
+    provider_name = str(config.get("model_provider") or provider_status.get("provider") or "").strip()
+    if not provider_name or provider_name == "openai":
+        provider_name = PROVIDER_PROFILE_DEFAULTS["provider"]
+    provider = provider_config(config, provider_name) or {}
+    return {
+        "mode": mode,
+        "provider": provider_name,
+        "base_url": first_non_empty_string(provider.get("base_url")),
+        "api_key": first_non_empty_string(
+            provider.get("experimental_bearer_token"),
+            provider.get("api_key"),
+            auth.get("OPENAI_API_KEY"),
+            config.get("OPENAI_API_KEY"),
+        ),
+        "model": first_non_empty_string(config.get("model")),
+        "wire_api": first_non_empty_string(provider.get("wire_api")) or "responses",
+    }
+
+
+def provider_profile_message(profile: dict[str, str], provider_status: dict[str, object]) -> str:
+    mode = profile["mode"]
+    if mode == "official":
+        return "官方登录模式会保留 Codex 原生登录态，不写入 API Key。"
+    if mode == "mixed-api":
+        if provider_status.get("chatgpt_login_token_present") is not True:
+            return "保留登录态 + API 需要先在 Codex 中登录 ChatGPT。"
+        return "保留登录态 + API 会写入 provider 配置，并保留移动端、Remote 和原生入口。"
+    return "纯 API 会写入 config.toml 和 auth.json，并启用完整增强。"
+
+
+def provider_profile_apply_message(profile: dict[str, str], action: dict[str, object], failed: bool) -> str:
+    if failed:
+        reason = str(action.get("reason") or "provider profile apply failed")
+        if reason == "chatgpt login token not found":
+            return "当前未检测到 ChatGPT 登录态；请先登录后再使用保留登录态 + API。"
+        return f"供应商切换失败：{reason}。"
+    if profile["mode"] == "official":
+        return "已切回官方登录模式；页面增强已设为保留登录态。"
+    if profile["mode"] == "mixed-api":
+        return "已切换到保留登录态 + API；页面增强已设为保留登录态。"
+    return "已切换到纯 API；页面增强已设为强制注入。"
+
+
 def apply_provider_mode(
     codex_home: str | Path | None = None,
     *,
@@ -463,6 +665,7 @@ def apply_provider_mode(
     base_url: str = "",
     api_key: str = "",
     wire_api: str = "responses",
+    model: str = "",
 ) -> dict[str, object]:
     mode = mode.strip().lower()
     if mode not in PROVIDER_MODES:
@@ -480,8 +683,8 @@ def apply_provider_mode(
     if not api_key:
         raise ValueError("api_key is required")
     if mode == "mixed-api":
-        return apply_mixed_api_provider_mode(codex_home, provider=provider, base_url=base_url, api_key=api_key, wire_api=wire_api)
-    return apply_pure_api_provider_mode(codex_home, provider=provider, base_url=base_url, api_key=api_key, wire_api=wire_api)
+        return apply_mixed_api_provider_mode(codex_home, provider=provider, base_url=base_url, api_key=api_key, wire_api=wire_api, model=model)
+    return apply_pure_api_provider_mode(codex_home, provider=provider, base_url=base_url, api_key=api_key, wire_api=wire_api, model=model)
 
 
 def apply_official_provider_mode(codex_home: str | Path | None = None) -> dict[str, object]:
@@ -491,10 +694,10 @@ def apply_official_provider_mode(codex_home: str | Path | None = None) -> dict[s
     config_text = config_path.read_text(encoding="utf-8") if config_path.exists() else ""
     updated_config = set_official_provider_in_toml(config_text)
     auth = read_json_object(auth_path)
-    auth_updated = dict(auth or {})
-    auth_removed_key = auth_updated.pop("OPENAI_API_KEY", None) is not None
+    auth_updated = without_openai_api_key(auth)
+    auth_changed = auth_updated != dict(auth or {})
     config_changed = updated_config != config_text
-    if not config_changed and not auth_removed_key:
+    if not config_changed and not auth_changed:
         return {
             "status": "skipped",
             "reason": "official provider mode already enabled",
@@ -503,10 +706,10 @@ def apply_official_provider_mode(codex_home: str | Path | None = None) -> dict[s
             "auth_path": str(auth_path),
         }
     config_backup_path = backup_config(config_path, "provider-mode-official") if config_changed and config_path.exists() else None
-    auth_backup_path = backup_auth(auth_path, "provider-mode-official") if auth_removed_key and auth_path.exists() else None
+    auth_backup_path = backup_auth(auth_path, "provider-mode-official") if auth_changed and auth_path.exists() else None
     if config_changed:
         config_path.write_text(updated_config, encoding="utf-8")
-    if auth_removed_key:
+    if auth_changed:
         auth_path.write_text(json.dumps(auth_updated, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return {
         "status": "updated",
@@ -526,6 +729,7 @@ def apply_mixed_api_provider_mode(
     base_url: str,
     api_key: str,
     wire_api: str,
+    model: str = "",
 ) -> dict[str, object]:
     config_path = config_path_for(codex_home)
     auth_path = config_path.parent / "auth.json"
@@ -547,6 +751,7 @@ def apply_mixed_api_provider_mode(
         base_url=base_url,
         api_key=api_key,
         wire_api=wire_api,
+        model=model,
         auth_payload=without_openai_api_key(auth),
         auth_backup_label="provider-mode-mixed-api",
     )
@@ -559,6 +764,7 @@ def apply_pure_api_provider_mode(
     base_url: str,
     api_key: str,
     wire_api: str,
+    model: str = "",
 ) -> dict[str, object]:
     config_path = config_path_for(codex_home)
     auth_path = config_path.parent / "auth.json"
@@ -570,6 +776,7 @@ def apply_pure_api_provider_mode(
         base_url=base_url,
         api_key=api_key,
         wire_api=wire_api,
+        model=model,
         auth_payload={"OPENAI_API_KEY": api_key},
         auth_backup_label="provider-mode-pure-api",
     )
@@ -584,6 +791,7 @@ def apply_provider_config_with_auth_payload(
     base_url: str,
     api_key: str,
     wire_api: str,
+    model: str = "",
     auth_payload: dict[str, Any],
     auth_backup_label: str,
 ) -> dict[str, object]:
@@ -596,6 +804,7 @@ def apply_provider_config_with_auth_payload(
         base_url=base_url,
         api_key=api_key,
         wire_api=wire_api,
+        model=model,
     )
     auth_text = auth_path.read_text(encoding="utf-8") if auth_path.exists() else ""
     updated_auth_text = json.dumps(auth_payload, ensure_ascii=False, indent=2) + "\n"
@@ -681,9 +890,12 @@ def set_login_preserving_provider_in_toml(
     base_url: str,
     api_key: str,
     wire_api: str,
+    model: str = "",
 ) -> str:
     lines = remove_root_assignment(text.splitlines(keepends=True), "OPENAI_API_KEY")
     lines = upsert_root_assignment(lines, "model_provider", toml_string(provider_name))
+    if model.strip():
+        lines = upsert_root_assignment(lines, "model", toml_string(model.strip()))
     section_name = f"model_providers.{provider_name}"
     section_start = find_table_start(lines, section_name)
     if section_start is None:
@@ -747,22 +959,43 @@ def first_non_empty_string(*values: object) -> str:
     return ""
 
 
+def saved_provider_profile_for(settings_home: str | Path | None, provider_name: str) -> dict[str, Any]:
+    settings = read_codex_mate_settings(settings_home)
+    profile = settings.get("provider_profile")
+    if not isinstance(profile, dict):
+        return {}
+    saved_provider = first_non_empty_string(profile.get("provider"))
+    if saved_provider and saved_provider != provider_name:
+        return {}
+    return dict(profile)
+
+
+def saved_profile_string(profile: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = profile.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
 def without_openai_api_key(auth: dict[str, Any] | None) -> dict[str, Any]:
     result = dict(auth or {})
     result.pop("OPENAI_API_KEY", None)
+    if auth_tokens_have_login_secret(result.get("tokens")):
+        result["auth_mode"] = "chatgpt"
     return result
+
+
+def auth_tokens_have_login_secret(tokens: object) -> bool:
+    if not isinstance(tokens, dict):
+        return False
+    return any(isinstance(tokens.get(key), str) and tokens[key].strip() for key in LOGIN_TOKEN_KEYS)
 
 
 def chatgpt_auth_has_login_token(auth: dict[str, Any] | None) -> bool:
     if not isinstance(auth, dict):
         return False
-    auth_mode = auth.get("auth_mode")
-    if not isinstance(auth_mode, str) or auth_mode.lower() != "chatgpt":
-        return False
-    tokens = auth.get("tokens")
-    if not isinstance(tokens, dict):
-        return False
-    return any(isinstance(tokens.get(key), str) and tokens[key].strip() for key in LOGIN_TOKEN_KEYS)
+    return auth_tokens_have_login_secret(auth.get("tokens"))
 
 
 def toml_string(value: str) -> str:

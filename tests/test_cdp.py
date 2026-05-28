@@ -59,7 +59,10 @@ def test_pick_page_target_rejects_missing_websocket():
 def test_build_bridge_script_installs_binding_callbacks():
     script = build_bridge_script("codexMate")
 
-    assert "window.codexMate" in script
+    assert 'window["codexMate"]' in script
+    assert 'const binding = window["codexMate"]' in script
+    assert 'typeof binding !== "function"' in script
+    assert "bridge binding unavailable" in script
     assert "window.__codexMateResolve" in script
     assert "window.__codexMateReject" in script
 
@@ -76,13 +79,12 @@ def test_loopback_session_ignores_environment_proxies():
         session.close()
 
 
-def test_make_bridge_binding_name_is_unique_for_reinjection():
+def test_make_bridge_binding_name_is_stable_for_reinjection():
     first = make_bridge_binding_name()
     second = make_bridge_binding_name()
 
-    assert first.startswith("codexMateV2_")
-    assert second.startswith("codexMateV2_")
-    assert first != second
+    assert first == "codexMateV2"
+    assert second == "codexMateV2"
 
 
 def test_bridge_loop_continues_after_idle_timeout():

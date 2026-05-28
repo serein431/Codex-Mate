@@ -95,7 +95,11 @@ def test_readme_describes_mobile_remote_troubleshooting():
 
     assert "### 移动端或 Remote 入口不见了" in text
     assert "### Provider 模式" in text
-    assert "顶部的“增强模式”会先显示当前检测结果" in text
+    assert "供应商配置" in text
+    assert "切换供应商" in text
+    assert "普通用户只需要" in text
+    assert "provider_profile" in text
+    assert "“增强模式”区域会继续显示当前检测结果" in text
     assert "~/.codex-mate/settings.json" in text
     assert "保持登录态" in text
     assert "强制注入" in text

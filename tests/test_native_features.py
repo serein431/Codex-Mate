@@ -245,6 +245,136 @@ def test_apply_pure_api_provider_mode_writes_full_api_auth(tmp_path):
     assert auth == {"OPENAI_API_KEY": "sk-new"}
 
 
+def test_apply_provider_profile_mixed_api_saves_profile_and_login_preserving_mode(tmp_path):
+    codex_home = tmp_path / ".codex"
+    settings_home = tmp_path / ".codex-mate"
+    codex_home.mkdir()
+    auth_path = codex_home / "auth.json"
+    config_path = codex_home / "config.toml"
+    auth_path.write_text(
+        '{"auth_mode":"chatgpt","OPENAI_API_KEY":"sk-old","tokens":{"refresh_token":"tok"}}\n',
+        encoding="utf-8",
+    )
+    config_path.write_text("[features]\ncodex_hooks = true\n", encoding="utf-8")
+
+    payload = native_features.apply_provider_profile(
+        codex_home,
+        settings_home=settings_home,
+        profile={
+            "mode": "mixed-api",
+            "provider": "jmrai",
+            "base_url": "https://jmrai.example/v1",
+            "api_key": "sk-new",
+            "model": "gpt-5.5",
+            "wire_api": "responses",
+        },
+    )
+
+    config = native_features.read_config(config_path)
+    auth = native_features.read_json_object(auth_path)
+    settings = native_features.read_json_object(settings_home / "settings.json")
+    provider = config["model_providers"]["jmrai"]
+    assert payload["status"] == "updated"
+    assert payload["profile"]["api_key_present"] is True
+    assert "api_key" not in payload["profile"]
+    assert payload["auth_enhancement_mode"] == "loginPreserving"
+    assert config["model_provider"] == "jmrai"
+    assert config["model"] == "gpt-5.5"
+    assert provider["requires_openai_auth"] is True
+    assert provider["experimental_bearer_token"] == "sk-new"
+    assert "OPENAI_API_KEY" not in auth
+    assert settings["auth_enhancement_mode"] == "loginPreserving"
+    assert settings["provider_profile"]["api_key"] == "sk-new"
+
+
+def test_apply_provider_profile_reuses_saved_api_key_when_form_leaves_key_blank(tmp_path):
+    codex_home = tmp_path / ".codex"
+    settings_home = tmp_path / ".codex-mate"
+    codex_home.mkdir()
+    (codex_home / "auth.json").write_text(
+        '{"auth_mode":"chatgpt","tokens":{"refresh_token":"tok"}}\n',
+        encoding="utf-8",
+    )
+    (settings_home).mkdir()
+    (settings_home / "settings.json").write_text(
+        '{"provider_profile":{"mode":"mixed-api","provider":"jmrai","base_url":"https://old.example/v1","api_key":"sk-saved","model":"gpt-old","wire_api":"responses"}}\n',
+        encoding="utf-8",
+    )
+
+    payload = native_features.apply_provider_profile(
+        codex_home,
+        settings_home=settings_home,
+        profile={
+            "mode": "mixed-api",
+            "provider": "jmrai",
+            "base_url": "https://new.example/v1",
+            "api_key": "",
+            "model": "gpt-new",
+            "wire_api": "responses",
+        },
+    )
+
+    config = native_features.read_config(codex_home / "config.toml")
+    settings = native_features.read_json_object(settings_home / "settings.json")
+    provider = config["model_providers"]["jmrai"]
+    assert payload["status"] == "updated"
+    assert config["model"] == "gpt-new"
+    assert provider["base_url"] == "https://new.example/v1"
+    assert provider["experimental_bearer_token"] == "sk-saved"
+    assert settings["provider_profile"]["api_key"] == "sk-saved"
+
+
+def test_apply_provider_profile_pure_api_sets_force_inject_mode(tmp_path):
+    codex_home = tmp_path / ".codex"
+    settings_home = tmp_path / ".codex-mate"
+    codex_home.mkdir()
+    (codex_home / "auth.json").write_text('{"auth_mode":"chatgpt","tokens":{"access_token":"tok"}}\n', encoding="utf-8")
+
+    payload = native_features.apply_provider_profile(
+        codex_home,
+        settings_home=settings_home,
+        profile={
+            "mode": "pure-api",
+            "provider": "jmrai",
+            "base_url": "https://jmrai.example/v1",
+            "api_key": "sk-new",
+            "model": "gpt-5.5",
+            "wire_api": "responses",
+        },
+    )
+
+    config = native_features.read_config(codex_home / "config.toml")
+    auth = native_features.read_json_object(codex_home / "auth.json")
+    settings = native_features.read_json_object(settings_home / "settings.json")
+    assert payload["status"] == "updated"
+    assert payload["auth_enhancement_mode"] == "forceInject"
+    assert payload["pluginEntryUnlock"] is True
+    assert config["model_provider"] == "jmrai"
+    assert config["model"] == "gpt-5.5"
+    assert auth == {"OPENAI_API_KEY": "sk-new"}
+    assert settings["auth_enhancement_mode"] == "forceInject"
+
+
+def test_provider_profile_status_returns_sanitized_saved_profile(tmp_path):
+    codex_home = tmp_path / ".codex"
+    settings_home = tmp_path / ".codex-mate"
+    codex_home.mkdir()
+    settings_home.mkdir()
+    (settings_home / "settings.json").write_text(
+        '{"provider_profile":{"mode":"pure-api","provider":"jmrai","base_url":"https://jmrai.example/v1","api_key":"sk-secret","model":"gpt-5.5","wire_api":"responses"}}\n',
+        encoding="utf-8",
+    )
+
+    payload = native_features.provider_profile_status(codex_home, settings_home=settings_home)
+
+    assert payload["status"] == "ok"
+    assert payload["profile"]["mode"] == "pure-api"
+    assert payload["profile"]["provider"] == "jmrai"
+    assert payload["profile"]["api_key_present"] is True
+    assert "api_key" not in payload["profile"]
+    assert payload["provider_mode"]["mode"] == "unknown"
+
+
 def test_auth_enhancement_mode_status_defaults_from_provider_mode(tmp_path):
     codex_home = tmp_path / ".codex"
     settings_home = tmp_path / ".codex-mate"
@@ -328,6 +458,118 @@ def test_set_auth_enhancement_mode_login_preserving_migrates_provider_when_possi
     assert provider["requires_openai_auth"] is True
     assert provider["experimental_bearer_token"] == "sk-auth"
     assert "OPENAI_API_KEY" not in auth
+
+
+def test_set_auth_enhancement_mode_reuses_saved_provider_key_when_live_key_is_missing(tmp_path):
+    codex_home = tmp_path / ".codex"
+    settings_home = tmp_path / ".codex-mate"
+    codex_home.mkdir()
+    settings_home.mkdir()
+    auth_path = codex_home / "auth.json"
+    config_path = codex_home / "config.toml"
+    auth_path.write_text(
+        '{"auth_mode":"chatgpt","tokens":{"access_token":"tok"}}\n',
+        encoding="utf-8",
+    )
+    config_path.write_text(
+        'model_provider = "jmrai"\n'
+        '[model_providers.jmrai]\n'
+        'name = "jmrai"\n'
+        'wire_api = "responses"\n'
+        'requires_openai_auth = false\n'
+        'base_url = "https://jmrai.example/v1"\n',
+        encoding="utf-8",
+    )
+    (settings_home / "settings.json").write_text(
+        '{"provider_profile":{"mode":"mixed-api","provider":"jmrai","base_url":"https://jmrai.example/v1","api_key":"sk-saved","model":"gpt-5.5","wire_api":"responses"}}\n',
+        encoding="utf-8",
+    )
+
+    payload = native_features.set_auth_enhancement_mode(
+        codex_home,
+        settings_home=settings_home,
+        mode="loginPreserving",
+    )
+
+    config = native_features.read_config(config_path)
+    provider = config["model_providers"]["jmrai"]
+    assert payload["status"] == "updated"
+    assert payload["auth_enhancement_mode"] == "loginPreserving"
+    assert payload["provider_action"]["status"] == "updated"
+    assert provider["requires_openai_auth"] is True
+    assert provider["experimental_bearer_token"] == "sk-saved"
+    assert config["model"] == "gpt-5.5"
+
+
+def test_login_preserving_mode_recovers_chatgpt_auth_mode_when_tokens_survive_api_switch(tmp_path):
+    codex_home = tmp_path / ".codex"
+    settings_home = tmp_path / ".codex-mate"
+    codex_home.mkdir()
+    auth_path = codex_home / "auth.json"
+    config_path = codex_home / "config.toml"
+    auth_path.write_text(
+        '{"auth_mode":"apikey","OPENAI_API_KEY":"sk-auth","tokens":{"refresh_token":"tok"}}\n',
+        encoding="utf-8",
+    )
+    config_path.write_text(
+        'model_provider = "custom"\n'
+        '[model_providers.custom]\n'
+        'name = "Custom"\n'
+        'wire_api = "responses"\n'
+        'requires_openai_auth = false\n'
+        'base_url = "https://relay.example.test/v1"\n',
+        encoding="utf-8",
+    )
+
+    payload = native_features.set_auth_enhancement_mode(
+        codex_home,
+        settings_home=settings_home,
+        mode="loginPreserving",
+    )
+
+    auth = native_features.read_json_object(auth_path)
+    config = native_features.read_config(config_path)
+    provider = config["model_providers"]["custom"]
+    assert payload["status"] == "updated"
+    assert payload["provider_action"]["status"] == "updated"
+    assert auth["auth_mode"] == "chatgpt"
+    assert auth["tokens"]["refresh_token"] == "tok"
+    assert "OPENAI_API_KEY" not in auth
+    assert provider["experimental_bearer_token"] == "sk-auth"
+
+
+def test_set_auth_enhancement_mode_login_preserving_fails_without_provider_api_key(tmp_path):
+    codex_home = tmp_path / ".codex"
+    settings_home = tmp_path / ".codex-mate"
+    codex_home.mkdir()
+    auth_path = codex_home / "auth.json"
+    config_path = codex_home / "config.toml"
+    auth_path.write_text(
+        '{"auth_mode":"chatgpt","tokens":{"refresh_token":"tok"}}\n',
+        encoding="utf-8",
+    )
+    config_path.write_text(
+        'model_provider = "custom"\n'
+        '[model_providers.custom]\n'
+        'name = "Custom"\n'
+        'wire_api = "responses"\n'
+        'requires_openai_auth = false\n'
+        'base_url = "https://relay.example.test/v1"\n',
+        encoding="utf-8",
+    )
+
+    payload = native_features.set_auth_enhancement_mode(
+        codex_home,
+        settings_home=settings_home,
+        mode="loginPreserving",
+    )
+
+    assert payload["status"] == "failed"
+    assert payload["provider_action"]["reason"] == "provider api key missing"
+    assert "供应商配置" in payload["message"]
+    assert "API Key" in payload["message"]
+    assert not (settings_home / "settings.json").exists()
+    assert "experimental_bearer_token" not in config_path.read_text(encoding="utf-8")
 
 
 def test_set_auth_enhancement_mode_login_preserving_fails_without_chatgpt_login(tmp_path):

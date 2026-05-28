@@ -47,6 +47,7 @@ def add_provider_mode_profile_arguments(parser: argparse.ArgumentParser) -> None
     parser.add_argument("--provider", required=True, help="Provider name to write into config.toml")
     parser.add_argument("--base-url", required=True, help="OpenAI-compatible API base URL")
     parser.add_argument("--api-key", required=True, help="API key for the provider")
+    parser.add_argument("--model", default="", help="Optional model name to write into config.toml")
     parser.add_argument("--wire-api", default="responses", choices=["responses", "chat"], help="Codex provider wire API")
 
 
@@ -353,6 +354,7 @@ def run_provider_mode(args: argparse.Namespace) -> int:
             provider=args.provider,
             base_url=args.base_url,
             api_key=args.api_key,
+            model=args.model,
             wire_api=args.wire_api,
         )
     else:

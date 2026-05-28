@@ -17,7 +17,7 @@
   const timelineMaxTopPercent = 98;
   const timelineMaxMarkerGapPercent = 3.5;
   const styleId = "codex-delete-style";
-  const codexDeleteStyleVersion = "12";
+  const codexDeleteStyleVersion = "13";
   const codexMateMenuId = "codex-mate-menu";
   const codexDeleteVersion = "6";
   const codexExportVersion = "1";
@@ -73,33 +73,102 @@
     style.dataset.codexDeleteStyleVersion = codexDeleteStyleVersion;
     style.textContent = `
       :root {
-        --codex-mate-action-color: var(--text-secondary, oklch(0.42 0.018 260));
-        --codex-mate-action-hover-color: var(--text-primary, oklch(0.24 0.02 260));
-        --codex-mate-action-hover-bg: color-mix(in srgb, var(--codex-mate-action-hover-color) 11%, transparent);
-        --codex-mate-popover-bg: var(--main-surface-primary, var(--bg-primary, oklch(0.985 0.004 260)));
-        --codex-mate-popover-fg: var(--text-primary, oklch(0.24 0.02 260));
-        --codex-mate-popover-muted: var(--text-secondary, oklch(0.52 0.018 260));
-        --codex-mate-popover-border: color-mix(in srgb, var(--codex-mate-popover-fg) 14%, transparent);
-        --codex-mate-popover-shadow: color-mix(in srgb, var(--codex-mate-popover-fg) 22%, transparent);
-        --codex-mate-success: oklch(0.48 0.14 145);
+        --codex-mate-action-color: hsl(240 3.8% 46.1%);
+        --codex-mate-action-hover-color: hsl(240 10% 3.9%);
+        --codex-mate-action-hover-bg: hsl(240 4.8% 95.9%);
+        --codex-mate-popover-bg: hsl(0 0% 100%);
+        --codex-mate-popover-fg: hsl(240 10% 3.9%);
+        --codex-mate-popover-muted: hsl(240 3.8% 46.1%);
+        --codex-mate-popover-border: hsl(240 5.9% 88%);
+        --codex-mate-popover-shadow: hsl(240 10% 3.9% / .16);
+        --codex-mate-overlay-bg: hsl(240 10% 3.9% / .24);
+        --codex-mate-card-bg: hsl(240 4.8% 96.8%);
+        --codex-mate-control-bg: hsl(240 4.8% 95.9%);
+        --codex-mate-control-hover-bg: hsl(240 5.9% 90%);
+        --codex-mate-input-bg: hsl(0 0% 100%);
+        --codex-mate-input-fg: hsl(240 10% 3.9%);
+        --codex-mate-input-border: hsl(240 5.9% 82%);
+        --codex-mate-toggle-bg: hsl(240 5.9% 84%);
+        --codex-mate-success: hsl(166 72% 36%);
+        --codex-mate-success-soft: hsl(166 72% 36% / .12);
+        --codex-mate-success-border: hsl(166 72% 36% / .55);
+        --codex-mate-status-ok: hsl(166 72% 36%);
+        --codex-mate-status-failed: hsl(0 72% 50%);
+        --codex-mate-status-checking: hsl(38 92% 42%);
       }
       @media (prefers-color-scheme: dark) {
         :root {
-          --codex-mate-action-color: var(--text-secondary, oklch(0.78 0.014 260));
-          --codex-mate-action-hover-color: var(--text-primary, oklch(0.96 0.006 260));
-          --codex-mate-popover-bg: var(--main-surface-primary, var(--bg-primary, oklch(0.22 0.008 260)));
-          --codex-mate-popover-fg: var(--text-primary, oklch(0.96 0.006 260));
-          --codex-mate-popover-muted: var(--text-secondary, oklch(0.73 0.014 260));
-          --codex-mate-success: oklch(0.72 0.15 150);
+          --codex-mate-action-color: hsl(240 5% 64.9%);
+          --codex-mate-action-hover-color: hsl(0 0% 98%);
+          --codex-mate-action-hover-bg: hsl(240 3.7% 15.9%);
+          --codex-mate-popover-bg: hsl(240 10% 3.9%);
+          --codex-mate-popover-fg: hsl(0 0% 98%);
+          --codex-mate-popover-muted: hsl(240 5% 64.9%);
+          --codex-mate-popover-border: hsl(240 3.7% 18%);
+          --codex-mate-popover-shadow: hsl(0 0% 0% / .45);
+          --codex-mate-overlay-bg: hsl(0 0% 0% / .45);
+          --codex-mate-card-bg: hsl(240 3.7% 13%);
+          --codex-mate-control-bg: hsl(240 3.7% 15.9%);
+          --codex-mate-control-hover-bg: hsl(240 3.7% 20%);
+          --codex-mate-input-bg: hsl(240 3.7% 15.9%);
+          --codex-mate-input-fg: hsl(0 0% 98%);
+          --codex-mate-input-border: hsl(240 3.7% 23%);
+          --codex-mate-toggle-bg: hsl(240 3.7% 24%);
+          --codex-mate-success: hsl(158 64% 52%);
+          --codex-mate-success-soft: hsl(158 64% 52% / .16);
+          --codex-mate-success-border: hsl(158 64% 52% / .55);
+          --codex-mate-status-ok: hsl(158 64% 52%);
+          --codex-mate-status-failed: hsl(0 91% 71%);
+          --codex-mate-status-checking: hsl(43 96% 56%);
         }
       }
-      :where(html.dark, body.dark, .dark, [data-theme="dark"], [data-color-mode="dark"]) {
-        --codex-mate-action-color: var(--text-secondary, oklch(0.78 0.014 260));
-        --codex-mate-action-hover-color: var(--text-primary, oklch(0.96 0.006 260));
-        --codex-mate-popover-bg: var(--main-surface-primary, var(--bg-primary, oklch(0.22 0.008 260)));
-        --codex-mate-popover-fg: var(--text-primary, oklch(0.96 0.006 260));
-        --codex-mate-popover-muted: var(--text-secondary, oklch(0.73 0.014 260));
-        --codex-mate-success: oklch(0.72 0.15 150);
+      :where(html.electron-light, body.electron-light, html.light, body.light, html[data-theme="light"], body[data-theme="light"], html[data-color-mode="light"], body[data-color-mode="light"]) {
+        --codex-mate-action-color: hsl(240 3.8% 46.1%);
+        --codex-mate-action-hover-color: hsl(240 10% 3.9%);
+        --codex-mate-action-hover-bg: hsl(240 4.8% 95.9%);
+        --codex-mate-popover-bg: hsl(0 0% 100%);
+        --codex-mate-popover-fg: hsl(240 10% 3.9%);
+        --codex-mate-popover-muted: hsl(240 3.8% 46.1%);
+        --codex-mate-popover-border: hsl(240 5.9% 88%);
+        --codex-mate-popover-shadow: hsl(240 10% 3.9% / .16);
+        --codex-mate-overlay-bg: hsl(240 10% 3.9% / .24);
+        --codex-mate-card-bg: hsl(240 4.8% 96.8%);
+        --codex-mate-control-bg: hsl(240 4.8% 95.9%);
+        --codex-mate-control-hover-bg: hsl(240 5.9% 90%);
+        --codex-mate-input-bg: hsl(0 0% 100%);
+        --codex-mate-input-fg: hsl(240 10% 3.9%);
+        --codex-mate-input-border: hsl(240 5.9% 82%);
+        --codex-mate-toggle-bg: hsl(240 5.9% 84%);
+        --codex-mate-success: hsl(166 72% 36%);
+        --codex-mate-success-soft: hsl(166 72% 36% / .12);
+        --codex-mate-success-border: hsl(166 72% 36% / .55);
+        --codex-mate-status-ok: hsl(166 72% 36%);
+        --codex-mate-status-failed: hsl(0 72% 50%);
+        --codex-mate-status-checking: hsl(38 92% 42%);
+      }
+      :where(html.electron-dark, body.electron-dark, html.dark, body.dark, html[data-theme="dark"], body[data-theme="dark"], html[data-color-mode="dark"], body[data-color-mode="dark"]) {
+        --codex-mate-action-color: hsl(240 5% 64.9%);
+        --codex-mate-action-hover-color: hsl(0 0% 98%);
+        --codex-mate-action-hover-bg: hsl(240 3.7% 15.9%);
+        --codex-mate-popover-bg: hsl(240 10% 3.9%);
+        --codex-mate-popover-fg: hsl(0 0% 98%);
+        --codex-mate-popover-muted: hsl(240 5% 64.9%);
+        --codex-mate-popover-border: hsl(240 3.7% 18%);
+        --codex-mate-popover-shadow: hsl(0 0% 0% / .45);
+        --codex-mate-overlay-bg: hsl(0 0% 0% / .45);
+        --codex-mate-card-bg: hsl(240 3.7% 13%);
+        --codex-mate-control-bg: hsl(240 3.7% 15.9%);
+        --codex-mate-control-hover-bg: hsl(240 3.7% 20%);
+        --codex-mate-input-bg: hsl(240 3.7% 15.9%);
+        --codex-mate-input-fg: hsl(0 0% 98%);
+        --codex-mate-input-border: hsl(240 3.7% 23%);
+        --codex-mate-toggle-bg: hsl(240 3.7% 24%);
+        --codex-mate-success: hsl(158 64% 52%);
+        --codex-mate-success-soft: hsl(158 64% 52% / .16);
+        --codex-mate-success-border: hsl(158 64% 52% / .55);
+        --codex-mate-status-ok: hsl(158 64% 52%);
+        --codex-mate-status-failed: hsl(0 91% 71%);
+        --codex-mate-status-checking: hsl(43 96% 56%);
       }
       .${actionGroupClass} {
         position: absolute;
@@ -384,17 +453,22 @@
         display: flex;
         align-items: center;
         justify-content: center;
-        background: rgba(0,0,0,.45);
+        background: var(--codex-mate-overlay-bg);
       }
-      .codex-mate-modal-content {
-        width: min(520px, calc(100vw - 48px));
-        border: 1px solid rgba(255,255,255,.12);
-        border-radius: 18px;
-        background: #2b2b2b;
-        color: #f3f4f6;
-        font: 14px system-ui, sans-serif;
-        box-shadow: 0 24px 80px rgba(0,0,0,.45);
-      }
+              .codex-mate-modal-content {
+                width: min(520px, calc(100vw - 48px));
+                max-height: min(760px, calc(100vh - 32px));
+                display: flex;
+                flex-direction: column;
+                overflow: hidden;
+                border: 1px solid var(--codex-mate-popover-border);
+                border-radius: 18px;
+                background: var(--codex-mate-popover-bg);
+                color: var(--codex-mate-popover-fg);
+                color-scheme: light;
+                font: 14px system-ui, sans-serif;
+                box-shadow: 0 24px 80px var(--codex-mate-popover-shadow);
+              }
       .codex-mate-modal-header {
         display: flex;
         align-items: center;
@@ -407,9 +481,18 @@
         background: transparent;
         color: var(--codex-mate-popover-muted);
         font-size: 20px;
-        cursor: default;
+        cursor: pointer;
+        -webkit-app-region: no-drag;
       }
-      .codex-mate-modal-body { padding: 8px 20px 20px; }
+      .codex-mate-modal-close:hover,
+      .codex-mate-modal-close:focus-visible {
+        color: var(--codex-mate-popover-fg);
+        outline: none;
+      }
+      .codex-mate-modal-body {
+        padding: 8px 20px 20px;
+        overflow-y: auto;
+      }
       .codex-mate-mode-row {
         display: grid;
         grid-template-columns: 1fr;
@@ -423,84 +506,163 @@
         gap: 12px;
       }
       .codex-mate-mode-title { font-weight: 650; }
-      .codex-mate-mode-description { color: #a1a1aa; font-size: 12px; line-height: 1.45; }
-      .codex-mate-mode-status { color: #a1a1aa; font-size: 12px; line-height: 1.45; }
-      .codex-mate-mode-status[data-status="ok"] { color: #34d399; }
-      .codex-mate-mode-status[data-status="failed"] { color: #f87171; }
+              .codex-mate-mode-description { color: var(--codex-mate-popover-muted); font-size: 12px; line-height: 1.45; }
+              .codex-mate-mode-status { color: var(--codex-mate-popover-muted); font-size: 12px; line-height: 1.45; }
+      .codex-mate-mode-status[data-status="ok"] { color: var(--codex-mate-status-ok); }
+      .codex-mate-mode-status[data-status="failed"] { color: var(--codex-mate-status-failed); }
       .codex-mate-mode-status[data-status="checking"],
-      .codex-mate-mode-status[data-status="saving"] { color: #fbbf24; }
+      .codex-mate-mode-status[data-status="saving"] { color: var(--codex-mate-status-checking); }
       .codex-mate-auth-card {
         display: grid;
         grid-template-columns: 1fr auto;
         align-items: center;
         gap: 12px;
-        border: 1px solid rgba(255,255,255,.12);
-        border-radius: 10px;
-        background: rgba(255,255,255,.05);
-        padding: 11px 12px;
-      }
-      .codex-mate-auth-summary {
-        color: #f3f4f6;
-        font-size: 13px;
-        font-weight: 650;
-        line-height: 18px;
-      }
-      .codex-mate-auth-detail {
-        margin-top: 3px;
-        color: #a1a1aa;
-        font-size: 12px;
-        line-height: 1.45;
-      }
+                border: 1px solid var(--codex-mate-popover-border);
+                border-radius: 10px;
+                background: var(--codex-mate-card-bg);
+                padding: 11px 12px;
+              }
+              .codex-mate-auth-summary {
+                color: var(--codex-mate-popover-fg);
+                font-size: 13px;
+                font-weight: 650;
+                line-height: 18px;
+              }
+              .codex-mate-auth-detail {
+                margin-top: 3px;
+                color: var(--codex-mate-popover-muted);
+                font-size: 12px;
+                line-height: 1.45;
+              }
       .codex-mate-mode-switch {
         display: grid;
         grid-template-columns: 1fr 1fr;
         gap: 4px;
         padding: 4px;
-        border: 1px solid rgba(255,255,255,.12);
-        border-radius: 10px;
-        background: rgba(255,255,255,.06);
-      }
-      .codex-mate-mode-option {
-        min-height: 58px;
-        border: 1px solid rgba(255,255,255,.12);
-        border-radius: 7px;
-        background: rgba(255,255,255,.04);
-        color: #d4d4d8;
-        font: 12px system-ui, sans-serif;
-        letter-spacing: 0;
-        cursor: pointer;
-        text-align: left;
-        padding: 8px 10px;
-      }
-      .codex-mate-mode-option strong { display: block; color: #f3f4f6; font-size: 13px; line-height: 18px; }
-      .codex-mate-mode-option span { display: block; margin-top: 2px; color: #a1a1aa; line-height: 16px; }
+                border: 1px solid var(--codex-mate-popover-border);
+                border-radius: 10px;
+                background: var(--codex-mate-control-bg);
+              }
+              .codex-mate-mode-option {
+                min-height: 58px;
+                border: 1px solid var(--codex-mate-popover-border);
+                border-radius: 7px;
+                background: var(--codex-mate-popover-bg);
+                color: var(--codex-mate-popover-muted);
+                font: 12px system-ui, sans-serif;
+                letter-spacing: 0;
+                cursor: pointer;
+                text-align: left;
+                padding: 8px 10px;
+              }
+              .codex-mate-mode-option strong { display: block; color: var(--codex-mate-popover-fg); font-size: 13px; line-height: 18px; }
+              .codex-mate-mode-option span { display: block; margin-top: 2px; color: var(--codex-mate-popover-muted); line-height: 16px; }
       .codex-mate-mode-option[data-active="true"] {
-        border-color: rgba(16,163,127,.72);
-        background: rgba(16,163,127,.18);
+        border-color: var(--codex-mate-success-border);
+        background: var(--codex-mate-success-soft);
       }
       .codex-mate-mode-option:disabled {
         opacity: .62;
         cursor: default;
       }
-      .codex-mate-row {
+      .codex-mate-provider-form {
+        display: grid;
+        gap: 12px;
+      }
+      .codex-mate-provider-modes {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 8px;
+      }
+      .codex-mate-provider-mode {
+        min-height: 50px;
+        border: 1px solid var(--codex-mate-popover-border);
+        border-radius: 8px;
+        background: transparent;
+        color: var(--codex-mate-popover-fg);
+        padding: 8px;
+        font: 12px/16px system-ui, sans-serif;
+        text-align: left;
+        cursor: pointer;
+        letter-spacing: 0;
+      }
+      .codex-mate-provider-mode[data-active="true"] {
+        border-color: var(--codex-mate-success);
+        background: var(--codex-mate-success-soft);
+      }
+      .codex-mate-provider-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 10px;
+      }
+      .codex-mate-provider-field {
+        display: grid;
+        gap: 5px;
+      }
+      .codex-mate-provider-field span {
+        color: var(--codex-mate-popover-muted);
+        font-size: 12px;
+      }
+      .codex-mate-provider-field input,
+      .codex-mate-provider-field select {
+        width: 100%;
+        min-height: 34px;
+        border: 1px solid var(--codex-mate-input-border);
+        border-radius: 7px;
+        background: var(--codex-mate-input-bg);
+        color: var(--codex-mate-input-fg);
+        color-scheme: light;
+        padding: 6px 8px;
+        font: 13px/18px system-ui, sans-serif;
+        letter-spacing: 0;
+      }
+      .codex-mate-provider-field[data-disabled="true"] {
+        opacity: .55;
+      }
+      .codex-mate-provider-field[data-disabled="true"] input,
+      .codex-mate-provider-field[data-disabled="true"] select {
+        pointer-events: none;
+      }
+      .codex-mate-provider-footer {
         display: flex;
         align-items: center;
         justify-content: space-between;
-        gap: 16px;
-        padding: 12px 0;
-        border-top: 1px solid rgba(255,255,255,.1);
+        gap: 10px;
       }
-      .codex-mate-row:first-child { border-top: 0; }
-      .codex-mate-row-title { font-weight: 550; }
-      .codex-mate-row-description { margin-top: 3px; color: #a1a1aa; font-size: 12px; }
-      .codex-mate-toggle {
-        width: 42px;
-        height: 24px;
-        border: 0;
-        border-radius: 999px;
-        background: #52525b;
-        padding: 2px;
+      .codex-mate-provider-status {
+        color: var(--codex-mate-popover-muted);
+        font-size: 12px;
+        line-height: 1.45;
       }
+      .codex-mate-provider-status[data-status="ok"] { color: var(--codex-mate-status-ok); }
+      .codex-mate-provider-status[data-status="failed"] { color: var(--codex-mate-status-failed); }
+      .codex-mate-provider-status[data-status="checking"],
+      .codex-mate-provider-status[data-status="saving"] { color: var(--codex-mate-status-checking); }
+      @media (max-width: 560px) {
+        .codex-mate-provider-modes,
+        .codex-mate-provider-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+              .codex-mate-row {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 16px;
+                padding: 12px 0;
+                border-top: 1px solid var(--codex-mate-popover-border);
+              }
+              .codex-mate-row:first-child { border-top: 0; }
+              .codex-mate-row-title { font-weight: 550; }
+              .codex-mate-row-description { margin-top: 3px; color: var(--codex-mate-popover-muted); font-size: 12px; }
+              .codex-mate-toggle {
+                width: 42px;
+                height: 24px;
+                border: 0;
+                border-radius: 999px;
+                background: var(--codex-mate-toggle-bg);
+                padding: 2px;
+              }
       .codex-mate-toggle span {
         display: block;
         width: 20px;
@@ -509,9 +671,9 @@
         background: white;
         transition: transform .12s ease;
       }
-      .codex-mate-toggle[data-enabled="true"] { background: #10a37f; }
+      .codex-mate-toggle[data-enabled="true"] { background: var(--codex-mate-success); }
       .codex-mate-toggle[data-enabled="true"] span { transform: translateX(18px); }
-      .codex-mate-about { color: #a1a1aa; line-height: 1.5; }
+              .codex-mate-about { color: var(--codex-mate-popover-muted); line-height: 1.5; }
       .codex-mate-actions {
         display: inline-flex;
         align-items: center;
@@ -519,10 +681,10 @@
         flex: 0 0 auto;
       }
       .codex-mate-action-button {
-        border: 1px solid rgba(255,255,255,.14);
-        border-radius: 7px;
-        background: rgba(255,255,255,.08);
-        color: #f3f4f6;
+                border: 1px solid var(--codex-mate-popover-border);
+                border-radius: 7px;
+                background: var(--codex-mate-control-bg);
+                color: var(--codex-mate-popover-fg);
         font: 13px system-ui, sans-serif;
         line-height: 18px;
         padding: 6px 10px;
@@ -531,8 +693,8 @@
       }
       .codex-mate-action-button:hover,
       .codex-mate-action-button:focus-visible {
-        border-color: rgba(16,163,127,.55);
-        background: rgba(16,163,127,.18);
+        border-color: var(--codex-mate-success-border);
+        background: var(--codex-mate-success-soft);
       }
       .codex-mate-action-button:disabled {
         opacity: .5;
@@ -547,17 +709,22 @@
         margin-right: 8px;
       }
       .codex-mate-backend-indicator[data-status="ok"] {
-        background: #34d399;
+        background: var(--codex-mate-status-ok);
         box-shadow: 0 0 8px rgba(52,211,153,.75);
       }
       .codex-mate-backend-indicator[data-status="failed"] {
-        background: #ef4444;
+        background: var(--codex-mate-status-failed);
         box-shadow: 0 0 8px rgba(239,68,68,.75);
       }
-      .codex-mate-backend-indicator[data-status="checking"] { background: #fbbf24; }
-      .codex-mate-backend-label { color: #a1a1aa; font-size: 12px; }
-      .codex-mate-backend-label[data-status="ok"] { color: #34d399; }
-      .codex-mate-backend-label[data-status="failed"] { color: #f87171; }
+      .codex-mate-backend-indicator[data-status="checking"] { background: var(--codex-mate-status-checking); }
+              .codex-mate-backend-label { color: var(--codex-mate-popover-muted); font-size: 12px; }
+      .codex-mate-backend-label[data-status="ok"] { color: var(--codex-mate-status-ok); }
+      .codex-mate-backend-label[data-status="failed"] { color: var(--codex-mate-status-failed); }
+      :where(html.electron-dark, body.electron-dark, html.dark, body.dark, html[data-theme="dark"], body[data-theme="dark"], html[data-color-mode="dark"], body[data-color-mode="dark"]) .codex-mate-modal-content,
+      :where(html.electron-dark, body.electron-dark, html.dark, body.dark, html[data-theme="dark"], body[data-theme="dark"], html[data-color-mode="dark"], body[data-color-mode="dark"]) .codex-mate-provider-field input,
+      :where(html.electron-dark, body.electron-dark, html.dark, body.dark, html[data-theme="dark"], body[data-theme="dark"], html[data-color-mode="dark"], body[data-color-mode="dark"]) .codex-mate-provider-field select {
+        color-scheme: dark;
+      }
       .${timelineClass} {
         position: fixed;
         top: calc(72px + 12px);
@@ -724,7 +891,10 @@
       );
     });
     document.querySelectorAll("[data-codex-mate-refresh-auth]").forEach((button) => {
-      button.disabled = status === "checking" || status === "saving";
+      const waiting = status === "checking" || status === "saving";
+      button.disabled = waiting;
+      button.textContent = waiting ? "正在检测…" : loginReady ? "重新检测" : "我已登录，重新检测";
+      button.setAttribute("title", loginReady ? "重新检测 ChatGPT 登录状态。" : "登录 ChatGPT 后重新检测。");
     });
   }
 
@@ -763,6 +933,129 @@
     }
     renderCodexMateMenu();
     renderAuthModeStatus();
+    scan();
+  }
+
+  let codexMateProviderProfileStatus = { status: "checking", message: "正在读取供应商配置…" };
+  let codexMateProviderProfilePayload = null;
+  let codexMateProviderProfileDirty = false;
+
+  function providerProfileDefaults() {
+    return {
+      mode: "mixed-api",
+      provider: "codex-mate",
+      base_url: "",
+      model: "",
+      wire_api: "responses",
+      api_key_present: false,
+    };
+  }
+
+  function currentProviderProfile() {
+    return { ...providerProfileDefaults(), ...(codexMateProviderProfilePayload?.profile || {}) };
+  }
+
+  function activeProviderMode() {
+    const active = document.querySelector("[data-codex-mate-provider-mode][data-active='true']");
+    return active?.getAttribute("data-codex-mate-provider-mode") || currentProviderProfile().mode || "mixed-api";
+  }
+
+  function providerFieldValue(field) {
+    const input = document.querySelector(`[data-codex-mate-provider-field="${field}"]`);
+    return input?.value?.trim?.() || "";
+  }
+
+  function setProviderFieldValue(field, value) {
+    const input = document.querySelector(`[data-codex-mate-provider-field="${field}"]`);
+    if (input && document.activeElement !== input) input.value = value || "";
+  }
+
+  function fillProviderProfileForm(profile) {
+    const next = { ...providerProfileDefaults(), ...(profile || {}) };
+    document.querySelectorAll("[data-codex-mate-provider-mode]").forEach((button) => {
+      button.dataset.active = String(button.getAttribute("data-codex-mate-provider-mode") === next.mode);
+    });
+    setProviderFieldValue("provider", next.provider);
+    setProviderFieldValue("base_url", next.base_url);
+    setProviderFieldValue("model", next.model);
+    setProviderFieldValue("wire_api", next.wire_api || "responses");
+    const keyInput = document.querySelector('[data-codex-mate-provider-field="api_key"]');
+    if (keyInput && document.activeElement !== keyInput) {
+      keyInput.value = "";
+      keyInput.placeholder = next.api_key_present ? "已保存，留空继续使用" : "粘贴 API Key";
+    }
+  }
+
+  function renderProviderProfileStatus() {
+    const status = codexMateProviderProfileStatus.status || "ok";
+    const mode = activeProviderMode();
+    document.querySelectorAll("[data-codex-mate-provider-status]").forEach((node) => {
+      node.dataset.status = status;
+      node.textContent = codexMateProviderProfileStatus.message || "供应商配置已同步";
+    });
+    document.querySelectorAll("[data-codex-mate-provider-mode]").forEach((button) => {
+      button.disabled = status === "checking" || status === "saving";
+      button.dataset.active = String(button.getAttribute("data-codex-mate-provider-mode") === mode);
+    });
+    document.querySelectorAll("[data-codex-mate-provider-apply]").forEach((button) => {
+      button.disabled = status === "checking" || status === "saving";
+    });
+    document.querySelectorAll(".codex-mate-provider-field").forEach((field) => {
+      const input = field.querySelector("[data-codex-mate-provider-field]");
+      const disabled = mode === "official" && !!input;
+      field.dataset.disabled = String(disabled);
+      if (input) input.disabled = disabled || status === "checking" || status === "saving";
+    });
+  }
+
+  function readProviderProfileForm() {
+    return {
+      mode: activeProviderMode(),
+      provider: providerFieldValue("provider"),
+      base_url: providerFieldValue("base_url"),
+      api_key: providerFieldValue("api_key"),
+      model: providerFieldValue("model"),
+      wire_api: providerFieldValue("wire_api") || "responses",
+    };
+  }
+
+  async function checkCodexMateProviderProfileStatus() {
+    codexMateProviderProfileStatus = { status: "checking", message: "正在读取供应商配置…" };
+    renderProviderProfileStatus();
+    try {
+      const result = await withTimeout(postJson("/provider-profile/status", {}), 2500, "供应商配置读取超时");
+      if (result?.status === "failed") throw new Error(result.message || "供应商配置读取失败");
+      codexMateProviderProfilePayload = result || null;
+      codexMateProviderProfileStatus = { status: "ok", message: result?.message || "供应商配置已同步" };
+      if (!codexMateProviderProfileDirty) fillProviderProfileForm(result?.profile);
+    } catch (error) {
+      codexMateProviderProfileStatus = { status: "failed", message: bridgeErrorMessage(error, "供应商配置读取失败") };
+    }
+    renderProviderProfileStatus();
+  }
+
+  async function applyCodexMateProviderProfile() {
+    const profile = readProviderProfileForm();
+    codexMateProviderProfileStatus = { status: "saving", message: "正在切换供应商…" };
+    renderProviderProfileStatus();
+    try {
+      const result = await withTimeout(postJson("/provider-profile/apply", { profile }), 10000, "供应商切换超时");
+      codexMateProviderProfilePayload = result || null;
+      if (result?.status === "failed") throw new Error(result?.message || "供应商切换失败");
+      codexMateProviderProfileDirty = false;
+      applyCodexMateAuthModePayload(result);
+      codexMateAuthModePayload = result || codexMateAuthModePayload;
+      codexMateAuthModeStatus = { status: "ok", message: result?.message || "增强模式已同步" };
+      codexMateProviderProfileStatus = { status: "ok", message: result?.message || "供应商已切换" };
+      fillProviderProfileForm(result?.profile);
+      showToast(result?.message || "供应商已切换", null);
+    } catch (error) {
+      codexMateProviderProfileStatus = { status: "failed", message: bridgeErrorMessage(error, "供应商切换失败") };
+      showToast(codexMateProviderProfileStatus.message, null);
+    }
+    renderCodexMateMenu();
+    renderAuthModeStatus();
+    renderProviderProfileStatus();
     scan();
   }
 
@@ -823,6 +1116,12 @@
     return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
   }
 
+  function bridgeFallbackTimeoutMs(path) {
+    if (path === "/backend/status") return 700;
+    if (path === "/provider-profile/status" || path === "/auth-enhancement-mode/status") return 1200;
+    return 2500;
+  }
+
   function retryableUpdateResult(result) {
     if (result?.status === "failed" && !("can_update" in result)) {
       return { ...result, can_update: true };
@@ -873,6 +1172,7 @@
   function openCodexMateModal() {
     document.querySelectorAll(".codex-mate-modal-overlay").forEach((node) => node.remove());
     document.querySelectorAll('[data-codex-mate-dialog="true"]').forEach((node) => node.remove());
+    codexMateProviderProfileDirty = false;
     const overlay = document.createElement("div");
     overlay.className = "codex-mate-modal-overlay";
     overlay.innerHTML = `
@@ -882,6 +1182,30 @@
           <button type="button" class="codex-mate-modal-close" aria-label="关闭">×</button>
         </div>
         <div class="codex-mate-modal-body">
+          <div class="codex-mate-mode-row">
+            <div class="codex-mate-mode-header">
+              <div class="codex-mate-mode-title">供应商配置</div>
+              <div class="codex-mate-mode-description">在这里填 API，不需要手动改 config.toml 或 auth.json。</div>
+            </div>
+            <div class="codex-mate-provider-form">
+              <div class="codex-mate-provider-modes" role="group" aria-label="供应商模式">
+                <button type="button" class="codex-mate-provider-mode" data-codex-mate-provider-mode="official">官方登录<br><span>不写 API Key</span></button>
+                <button type="button" class="codex-mate-provider-mode" data-codex-mate-provider-mode="mixed-api">保留登录态 + API<br><span>需要先登录 ChatGPT</span></button>
+                <button type="button" class="codex-mate-provider-mode" data-codex-mate-provider-mode="pure-api">纯 API<br><span>写入 auth.json</span></button>
+              </div>
+              <div class="codex-mate-provider-grid">
+                <label class="codex-mate-provider-field"><span>Provider 名称</span><input data-codex-mate-provider-field="provider" autocomplete="off" spellcheck="false" value="codex-mate"></label>
+                <label class="codex-mate-provider-field"><span>Model</span><input data-codex-mate-provider-field="model" autocomplete="off" spellcheck="false" placeholder="例如 gpt-5.5"></label>
+                <label class="codex-mate-provider-field"><span>Base URL</span><input data-codex-mate-provider-field="base_url" autocomplete="off" spellcheck="false" placeholder="https://example.com/v1"></label>
+                <label class="codex-mate-provider-field"><span>API Key</span><input data-codex-mate-provider-field="api_key" type="password" autocomplete="off" spellcheck="false" placeholder="粘贴 API Key"></label>
+                <label class="codex-mate-provider-field"><span>Wire API</span><select data-codex-mate-provider-field="wire_api"><option value="responses">responses</option><option value="chat">chat</option></select></label>
+              </div>
+              <div class="codex-mate-provider-footer">
+                <div class="codex-mate-provider-status" data-codex-mate-provider-status="true" data-status="checking">正在读取供应商配置…</div>
+                <button type="button" class="codex-mate-action-button" data-codex-mate-provider-apply="true">切换供应商</button>
+              </div>
+            </div>
+          </div>
           <div class="codex-mate-mode-row">
             <div class="codex-mate-mode-header">
               <div class="codex-mate-mode-title">增强模式</div>
@@ -972,6 +1296,20 @@
         void checkBackendStatus();
         return;
       }
+      const providerModeButton = closestElement(event.target, "[data-codex-mate-provider-mode]");
+      if (providerModeButton) {
+        codexMateProviderProfileDirty = true;
+        document.querySelectorAll("[data-codex-mate-provider-mode]").forEach((button) => {
+          button.dataset.active = String(button === providerModeButton);
+        });
+        renderProviderProfileStatus();
+        return;
+      }
+      const providerApplyButton = closestElement(event.target, "[data-codex-mate-provider-apply]");
+      if (providerApplyButton) {
+        void applyCodexMateProviderProfile();
+        return;
+      }
       const refreshAuthButton = closestElement(event.target, "[data-codex-mate-refresh-auth]");
       if (refreshAuthButton) {
         void checkCodexMateAuthModeStatus();
@@ -987,10 +1325,29 @@
       const key = toggle.getAttribute("data-codex-mate-setting");
       setCodexMateSetting(key, !codexMateSettings()[key]);
     }, true);
+    overlay.addEventListener("input", (event) => {
+      if (!closestElement(event.target, "[data-codex-mate-provider-field]")) return;
+      codexMateProviderProfileDirty = true;
+    }, true);
+    overlay.addEventListener("change", (event) => {
+      if (!closestElement(event.target, "[data-codex-mate-provider-field]")) return;
+      codexMateProviderProfileDirty = true;
+    }, true);
+    overlay.querySelector(".codex-mate-modal-close")?.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      overlay.remove();
+    }, true);
+    overlay.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") overlay.remove();
+    }, true);
     document.body.appendChild(overlay);
+    overlay.querySelector(".codex-mate-modal-close")?.focus?.({ preventScroll: true });
     renderCodexMateMenu();
     renderAuthModeStatus();
+    renderProviderProfileStatus();
     renderBackendStatus();
+    void checkCodexMateProviderProfileStatus();
     void checkCodexMateAuthModeStatus();
     void checkBackendStatus();
   }
@@ -1313,24 +1670,36 @@
     return { session_id: sessionId, title };
   }
 
+  async function httpPostJson(path, payload) {
+    try {
+      const response = await fetch(`${helperBase}${path}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload || {}),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        return { status: "failed", message: result?.message || result?.error || "请求失败" };
+      }
+      return result;
+    } catch (_) {
+      return { status: "failed", message: path === "/backend/status" ? "未连接" : "Codex Mate 后端未连接，请重启启动器" };
+    }
+  }
+
   async function postJson(path, payload) {
     if (!window.__codexMateBridge) {
-      try {
-        const response = await fetch(`${helperBase}${path}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload || {}),
-        });
-        const result = await response.json().catch(() => ({}));
-        if (!response.ok) {
-          return { status: "failed", message: result?.message || result?.error || "请求失败" };
-        }
-        return result;
-      } catch (_) {
-        return { status: "failed", message: path === "/backend/status" ? "未连接" : "Codex Mate 后端未连接，请重启启动器" };
-      }
+      return await httpPostJson(path, payload);
     }
-    return await window.__codexMateBridge(path, payload);
+    try {
+      const result = await withTimeout(window.__codexMateBridge(path, payload), bridgeFallbackTimeoutMs(path), "Codex Mate bridge timeout");
+      if (result?.status !== "failed" || !/Unknown bridge path|bridge timeout/i.test(String(result?.message || ""))) {
+        return result;
+      }
+    } catch (_) {
+      // Fall through to the HTTP helper when the in-page bridge is stale or wedged.
+    }
+    return await httpPostJson(path, payload);
   }
 
   function downloadMarkdown(filename, markdown) {
