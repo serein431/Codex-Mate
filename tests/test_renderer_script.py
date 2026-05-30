@@ -215,7 +215,7 @@ def test_renderer_script_sidebar_delete_opens_on_pointerup_when_click_is_unrelia
 
     text = Path("codex_mate/inject/renderer-inject.js").read_text(encoding="utf-8")
     assert "updateDeleteButtonOffsets" in text
-    assert "codexDeleteStyleVersion = \"14\"" in text
+    assert "codexDeleteStyleVersion = \"15\"" in text
     assert "right: max(66px, var(--codex-session-actions-right, 28px))" in text
     assert "确认" in text
     assert "归档对话" in text
@@ -402,13 +402,18 @@ def test_renderer_script_adds_session_move_contract():
 def test_renderer_script_adds_conversation_timeline_and_scroll_restore():
     text = Path("codex_mate/inject/renderer-inject.js").read_text(encoding="utf-8")
 
-    assert "conversationTimeline: false" in text
+    assert "conversationTimeline: true" in text
     assert "threadScrollRestore: true" in text
     assert "codex-conversation-timeline" in text
     assert "function refreshConversationTimeline" in text
     assert "function conversationTimelineQuestions" in text
     assert "function createConversationTimelineMarker" in text
-    assert "removeConversationTimeline()" in text
+    assert "完整对话目录" in text
+    assert 'postJson("/conversation-timeline", ref)' in text
+    assert "conversationTimelineCache" in text
+    assert "approximateScrollTimelineTarget" in text
+    assert "retryResolveTimelineTarget" in text
+    assert "markTimelineProgrammaticScroll" in text
     assert "const questions = prepareTimelineQuestions(conversationTimelineQuestions())" not in text
     assert "function readThreadScrollEntries" in text
     assert "function saveThreadScrollPositionNow" in text
@@ -518,8 +523,8 @@ def test_renderer_script_does_not_include_fast_mode_patch():
     assert '"forceInject"' in text
     assert "会话删除" in text
     assert "Markdown 导出" in text
-    assert "对话时间线" not in text
-    assert 'data-codex-mate-setting="conversationTimeline"' not in text
+    assert "完整对话目录" in text
+    assert 'data-codex-mate-setting="conversationTimeline"' in text
     assert "滚动位置恢复" in text
     assert "原生菜单栏位置" in text
     assert "nativeMenuPlacement: true" in text
@@ -554,8 +559,8 @@ def test_renderer_script_does_not_include_fast_mode_patch():
     assert "removeDuplicateCodexMateMenus" in text
     assert "data-codex-mate-menu" in text
     assert "label.startsWith(\"Codex Mate\")" in text
-    assert "codexMateMenuVersion = \"24\"" in text
-    assert "codexMateTriggerInstalled = \"24\"" in text
+    assert "codexMateMenuVersion = \"25\"" in text
+    assert "codexMateTriggerInstalled = \"25\"" in text
     assert "codexMateFileButtonVersion" not in text
     assert "function visibleRightPanelLeft" in text
     assert "[role='tabpanel'], .absolute.top-0.bottom-0.left-0" in text

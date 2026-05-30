@@ -36,6 +36,15 @@ class FakeDeleteService:
     def export_markdown(self, session: SessionRef):
         return {"status": "exported", "session_id": session.session_id, "message": "exported", "filename": "First.md", "markdown": "# First\n"}
 
+    def conversation_timeline(self, session: SessionRef):
+        return {
+            "status": "ready",
+            "session_id": session.session_id,
+            "title": session.title,
+            "message_count": 1,
+            "items": [{"id": "u-0001", "preview": "第一条"}],
+        }
+
     def backend_status(self):
         return {"status": "ok", "message": "后端已连接", "version": "v9.9.9"}
 
@@ -155,6 +164,24 @@ def test_helper_server_routes_export_and_backend_status():
     assert exported["filename"] == "First.md"
     assert status["status"] == "ok"
     assert status["message"] == "后端已连接"
+
+
+def test_helper_server_routes_conversation_timeline():
+    service = FakeDeleteService()
+    server = HelperServer("127.0.0.1", 0, service)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base = f"http://127.0.0.1:{server.port}"
+        timeline = post_json(base + "/conversation-timeline", {"session_id": "s1", "title": "First"})
+    finally:
+        server.shutdown()
+        thread.join(timeout=3)
+
+    assert timeline["status"] == "ready"
+    assert timeline["session_id"] == "s1"
+    assert timeline["title"] == "First"
+    assert timeline["items"] == [{"id": "u-0001", "preview": "第一条"}]
 
 
 def test_helper_server_routes_auth_enhancement_mode():

@@ -275,6 +275,16 @@ def test_bridge_routes_export_and_backend_status(tmp_path):
     assert status == {"status": "ok"}
 
 
+def test_bridge_routes_conversation_timeline(tmp_path):
+    class Service:
+        def conversation_timeline(self, session):
+            return {"status": "ready", "session_id": session.session_id, "title": session.title, "items": []}
+
+    timeline = launcher.handle_bridge_request(Service(), "/conversation-timeline", {"session_id": "s1", "title": "First"})
+
+    assert timeline == {"status": "ready", "session_id": "s1", "title": "First", "items": []}
+
+
 def test_bridge_routes_auth_enhancement_mode(tmp_path):
     class Service:
         def auth_enhancement_mode_status(self):
