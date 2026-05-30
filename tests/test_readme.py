@@ -163,19 +163,22 @@ def test_readme_describes_in_app_update_controls():
     assert "CodexMate-windows.zip" in text
 
 
-def test_readme_describes_export_timeline_and_scroll_restore():
+def test_readme_describes_export_cc_switch_and_scroll_restore():
     text = Path("README.md").read_text(encoding="utf-8")
 
     assert "导出当前对话为 Markdown" in text
     assert "移动会话到普通对话或其他项目" in text
+    assert "CC Switch 速切" in text
+    assert "~/.cc-switch/cc-switch.db" in text
     assert "## 功能说明" in text
     assert "### Markdown 导出" in text
     assert "读取本机 `state_5.sqlite`" in text
     assert "### 会话移动" in text
     assert "侧边栏里已有的项目" in text
-    assert "### 对话时间线与滚动恢复" in text
-    assert "用户问题时间线" in text
+    assert "### 滚动位置恢复" in text
     assert "上次看到的位置" in text
+    assert "用户问题时间线" not in text
+    assert "对话时间线" not in text
     assert "原生文件树入口" not in text
     assert "256KB" not in text
 

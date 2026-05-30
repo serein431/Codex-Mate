@@ -1,6 +1,29 @@
 from pathlib import Path
+import json
+import sqlite3
 
 from codex_mate import native_features
+
+
+def create_cc_switch_db(path, rows):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(path) as conn:
+        conn.execute(
+            "CREATE TABLE providers ("
+            "id TEXT NOT NULL, "
+            "app_type TEXT NOT NULL, "
+            "name TEXT NOT NULL, "
+            "settings_config TEXT NOT NULL, "
+            "created_at INTEGER, "
+            "sort_index INTEGER, "
+            "is_current BOOLEAN NOT NULL DEFAULT 0, "
+            "PRIMARY KEY (id, app_type)"
+            ")"
+        )
+        conn.executemany(
+            "INSERT INTO providers (id, app_type, name, settings_config, created_at, sort_index, is_current) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            rows,
+        )
 
 
 def test_remote_feature_status_reports_missing_flags(tmp_path):
@@ -353,6 +376,160 @@ def test_apply_provider_profile_pure_api_sets_force_inject_mode(tmp_path):
     assert config["model"] == "gpt-5.5"
     assert auth == {"OPENAI_API_KEY": "sk-new"}
     assert settings["auth_enhancement_mode"] == "forceInject"
+
+
+def test_apply_cc_switch_provider_uses_mixed_api_when_chatgpt_login_exists(tmp_path, monkeypatch):
+    codex_home = tmp_path / ".codex"
+    settings_home = tmp_path / ".codex-mate"
+    ccs_home = tmp_path / ".cc-switch"
+    codex_home.mkdir()
+    (codex_home / "auth.json").write_text(
+        '{"auth_mode":"chatgpt","OPENAI_API_KEY":"sk-old","tokens":{"refresh_token":"tok"}}\n',
+        encoding="utf-8",
+    )
+    config = (
+        'model_provider = "custom"\n'
+        'model = "gpt-5.5"\n'
+        "\n"
+        "[model_providers.custom]\n"
+        'name = "Custom"\n'
+        'base_url = "https://relay.example/v1"\n'
+        'wire_api = "responses"\n'
+        "requires_openai_auth = true\n"
+    )
+    create_cc_switch_db(ccs_home / "cc-switch.db", [("p1", "codex", "Relay", json.dumps({"config": config, "auth": {"OPENAI_API_KEY": "sk-new"}}), 1, 1, 0)])
+    history_calls = []
+    monkeypatch.setattr(native_features.history_sync, "resolve_paths", lambda home: ("paths", home))
+    monkeypatch.setattr(native_features.history_sync, "sync_history_if_ready", lambda paths: history_calls.append(paths) or {"status": "skipped"})
+
+    payload = native_features.apply_cc_switch_provider(
+        codex_home,
+        settings_home=settings_home,
+        cc_switch_home=ccs_home,
+        source_id="p1",
+    )
+
+    config_data = native_features.read_config(codex_home / "config.toml")
+    auth = native_features.read_json_object(codex_home / "auth.json")
+    assert payload["status"] == "updated"
+    assert payload["profile"]["mode"] == "mixed-api"
+    assert config_data["model_provider"] == "custom"
+    assert config_data["model"] == "gpt-5.5"
+    assert config_data["model_providers"]["custom"]["experimental_bearer_token"] == "sk-new"
+    assert "OPENAI_API_KEY" not in auth
+    assert history_calls == [("paths", codex_home)]
+    assert json.loads((ccs_home / "settings.json").read_text(encoding="utf-8"))["currentProviderCodex"] == "p1"
+
+
+def test_apply_cc_switch_provider_uses_pure_api_without_chatgpt_login(tmp_path, monkeypatch):
+    codex_home = tmp_path / ".codex"
+    settings_home = tmp_path / ".codex-mate"
+    ccs_home = tmp_path / ".cc-switch"
+    codex_home.mkdir()
+    (codex_home / "auth.json").write_text('{"auth_mode":"apikey","OPENAI_API_KEY":"sk-old"}\n', encoding="utf-8")
+    create_cc_switch_db(
+        ccs_home / "cc-switch.db",
+        [("p1", "codex", "Relay", json.dumps({"base_url": "https://relay.example/v1", "api_key": "sk-new", "api_format": "chat"}), 1, 1, 0)],
+    )
+    monkeypatch.setattr(native_features.history_sync, "resolve_paths", lambda home: ("paths", home))
+    monkeypatch.setattr(native_features.history_sync, "sync_history_if_ready", lambda paths: {"status": "skipped"})
+
+    payload = native_features.apply_cc_switch_provider(
+        codex_home,
+        settings_home=settings_home,
+        cc_switch_home=ccs_home,
+        source_id="p1",
+    )
+
+    config = native_features.read_config(codex_home / "config.toml")
+    auth = native_features.read_json_object(codex_home / "auth.json")
+    assert payload["status"] == "updated"
+    assert payload["profile"]["mode"] == "pure-api"
+    assert config["model_provider"] == "p1"
+    assert config["model_providers"]["p1"]["wire_api"] == "chat"
+    assert auth == {"OPENAI_API_KEY": "sk-new"}
+
+
+def test_apply_cc_switch_provider_switches_official_provider(tmp_path, monkeypatch):
+    codex_home = tmp_path / ".codex"
+    settings_home = tmp_path / ".codex-mate"
+    ccs_home = tmp_path / ".cc-switch"
+    codex_home.mkdir()
+    (codex_home / "auth.json").write_text('{"auth_mode":"chatgpt","OPENAI_API_KEY":"sk-old","tokens":{"access_token":"tok"}}\n', encoding="utf-8")
+    (codex_home / "config.toml").write_text('model_provider = "custom"\n[model_providers.custom]\nbase_url = "https://old.example/v1"\n', encoding="utf-8")
+    create_cc_switch_db(ccs_home / "cc-switch.db", [("official", "codex", "OpenAI Official", json.dumps({"config": "", "auth": {}}), 1, 1, 0)])
+    monkeypatch.setattr(native_features.history_sync, "resolve_paths", lambda home: ("paths", home))
+    monkeypatch.setattr(native_features.history_sync, "sync_history_if_ready", lambda paths: {"status": "skipped"})
+
+    payload = native_features.apply_cc_switch_provider(
+        codex_home,
+        settings_home=settings_home,
+        cc_switch_home=ccs_home,
+        source_id="official",
+    )
+
+    assert payload["status"] == "updated"
+    assert payload["profile"]["mode"] == "official"
+    assert 'model_provider = "custom"' not in (codex_home / "config.toml").read_text(encoding="utf-8")
+    assert "OPENAI_API_KEY" not in native_features.read_json_object(codex_home / "auth.json")
+
+
+def test_apply_cc_switch_provider_does_not_update_external_current_on_failure(tmp_path, monkeypatch):
+    codex_home = tmp_path / ".codex"
+    settings_home = tmp_path / ".codex-mate"
+    ccs_home = tmp_path / ".cc-switch"
+    codex_home.mkdir()
+    create_cc_switch_db(
+        ccs_home / "cc-switch.db",
+        [
+            ("old", "codex", "Old", json.dumps({"base_url": "https://old.example/v1", "api_key": "sk-old"}), 1, 1, 1),
+            ("new", "codex", "New", json.dumps({"base_url": "https://new.example/v1", "api_key": "sk-new"}), 2, 2, 0),
+        ],
+    )
+    (ccs_home / "settings.json").write_text('{"currentProviderCodex":"old"}\n', encoding="utf-8")
+    monkeypatch.setattr(native_features, "apply_provider_profile", lambda *args, **kwargs: {"status": "failed", "message": "boom"})
+
+    payload = native_features.apply_cc_switch_provider(
+        codex_home,
+        settings_home=settings_home,
+        cc_switch_home=ccs_home,
+        source_id="new",
+    )
+
+    assert payload["status"] == "failed"
+    with sqlite3.connect(ccs_home / "cc-switch.db") as conn:
+        rows = dict(conn.execute("SELECT id, is_current FROM providers WHERE app_type = 'codex'").fetchall())
+    assert rows == {"old": 1, "new": 0}
+    assert json.loads((ccs_home / "settings.json").read_text(encoding="utf-8"))["currentProviderCodex"] == "old"
+
+
+def test_apply_cc_switch_provider_reports_invalid_profile_without_updating_current(tmp_path):
+    codex_home = tmp_path / ".codex"
+    settings_home = tmp_path / ".codex-mate"
+    ccs_home = tmp_path / ".cc-switch"
+    codex_home.mkdir()
+    create_cc_switch_db(
+        ccs_home / "cc-switch.db",
+        [
+            ("old", "codex", "Old", json.dumps({"base_url": "https://old.example/v1", "api_key": "sk-old"}), 1, 1, 1),
+            ("broken", "codex", "Broken", json.dumps({"base_url": "https://broken.example/v1"}), 2, 2, 0),
+        ],
+    )
+    (ccs_home / "settings.json").write_text('{"currentProviderCodex":"old"}\n', encoding="utf-8")
+
+    payload = native_features.apply_cc_switch_provider(
+        codex_home,
+        settings_home=settings_home,
+        cc_switch_home=ccs_home,
+        source_id="broken",
+    )
+
+    assert payload["status"] == "failed"
+    assert "api_key is required" in payload["message"]
+    with sqlite3.connect(ccs_home / "cc-switch.db") as conn:
+        rows = dict(conn.execute("SELECT id, is_current FROM providers WHERE app_type = 'codex'").fetchall())
+    assert rows == {"old": 1, "broken": 0}
+    assert json.loads((ccs_home / "settings.json").read_text(encoding="utf-8"))["currentProviderCodex"] == "old"
 
 
 def test_provider_profile_status_returns_sanitized_saved_profile(tmp_path):

@@ -125,6 +125,21 @@ def test_service_applies_provider_profile(monkeypatch, tmp_path):
     assert calls == [(None, profile)]
 
 
+def test_service_routes_cc_switch_provider_actions(monkeypatch, tmp_path):
+    calls = []
+
+    monkeypatch.setattr(launcher.native_features, "cc_switch_providers_status", lambda: {"status": "ok", "providers": [{"source_id": "p1"}]})
+    monkeypatch.setattr(launcher.native_features, "apply_cc_switch_provider", lambda *, source_id: calls.append(source_id) or {"status": "updated", "source_id": source_id})
+    service = launcher.ApiFirstDeleteService(launcher.UnavailableApiAdapter(), None, tmp_path)
+
+    providers = service.cc_switch_providers()
+    applied = service.apply_cc_switch_provider("p1")
+
+    assert providers["providers"] == [{"source_id": "p1"}]
+    assert applied == {"status": "updated", "source_id": "p1"}
+    assert calls == ["p1"]
+
+
 def test_update_service_runs_one_click_update(monkeypatch, tmp_path):
     release = updater.Release(
         version="v9.9.9",
@@ -289,6 +304,21 @@ def test_bridge_routes_provider_profile(tmp_path):
 
     assert status == {"status": "ok", "profile": {"mode": "mixed-api"}}
     assert applied == {"status": "updated", "profile": profile}
+
+
+def test_bridge_routes_cc_switch_provider_actions(tmp_path):
+    class Service:
+        def cc_switch_providers(self):
+            return {"status": "ok", "providers": [{"source_id": "p1"}]}
+
+        def apply_cc_switch_provider(self, source_id):
+            return {"status": "updated", "source_id": source_id}
+
+    providers = launcher.handle_bridge_request(Service(), "/cc-switch/providers", {})
+    applied = launcher.handle_bridge_request(Service(), "/cc-switch/apply", {"source_id": "p1"})
+
+    assert providers["providers"] == [{"source_id": "p1"}]
+    assert applied == {"status": "updated", "source_id": "p1"}
 
 
 def test_bridge_routes_session_move_and_sort_keys(tmp_path):

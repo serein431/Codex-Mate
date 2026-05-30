@@ -215,7 +215,7 @@ def test_renderer_script_sidebar_delete_opens_on_pointerup_when_click_is_unrelia
 
     text = Path("codex_mate/inject/renderer-inject.js").read_text(encoding="utf-8")
     assert "updateDeleteButtonOffsets" in text
-    assert "codexDeleteStyleVersion = \"13\"" in text
+    assert "codexDeleteStyleVersion = \"14\"" in text
     assert "right: max(66px, var(--codex-session-actions-right, 28px))" in text
     assert "确认" in text
     assert "归档对话" in text
@@ -402,12 +402,14 @@ def test_renderer_script_adds_session_move_contract():
 def test_renderer_script_adds_conversation_timeline_and_scroll_restore():
     text = Path("codex_mate/inject/renderer-inject.js").read_text(encoding="utf-8")
 
-    assert "conversationTimeline: true" in text
+    assert "conversationTimeline: false" in text
     assert "threadScrollRestore: true" in text
     assert "codex-conversation-timeline" in text
     assert "function refreshConversationTimeline" in text
     assert "function conversationTimelineQuestions" in text
     assert "function createConversationTimelineMarker" in text
+    assert "removeConversationTimeline()" in text
+    assert "const questions = prepareTimelineQuestions(conversationTimelineQuestions())" not in text
     assert "function readThreadScrollEntries" in text
     assert "function saveThreadScrollPositionNow" in text
     assert "function restoreThreadScrollPosition" in text
@@ -481,6 +483,14 @@ def test_renderer_script_does_not_include_fast_mode_patch():
     assert "启用推荐模式" in text
     assert "临时启用强制注入" in text
     assert "供应商配置" in text
+    assert "CC Switch 速切" in text
+    assert "data-codex-mate-cc-switch-list" in text
+    assert "data-codex-mate-cc-switch-refresh" in text
+    assert "data-codex-mate-cc-switch-apply" in text
+    assert "checkCodexMateCcSwitchProviders" in text
+    assert "applyCodexMateCcSwitchProvider" in text
+    assert 'postJson("/cc-switch/providers", {})' in text
+    assert 'postJson("/cc-switch/apply", { source_id: sourceId })' in text
     assert "保留登录态 + API" in text
     assert "纯 API" in text
     assert "官方登录" in text
@@ -508,7 +518,8 @@ def test_renderer_script_does_not_include_fast_mode_patch():
     assert '"forceInject"' in text
     assert "会话删除" in text
     assert "Markdown 导出" in text
-    assert "对话时间线" in text
+    assert "对话时间线" not in text
+    assert 'data-codex-mate-setting="conversationTimeline"' not in text
     assert "滚动位置恢复" in text
     assert "原生菜单栏位置" in text
     assert "nativeMenuPlacement: true" in text
@@ -543,8 +554,8 @@ def test_renderer_script_does_not_include_fast_mode_patch():
     assert "removeDuplicateCodexMateMenus" in text
     assert "data-codex-mate-menu" in text
     assert "label.startsWith(\"Codex Mate\")" in text
-    assert "codexMateMenuVersion = \"23\"" in text
-    assert "codexMateTriggerInstalled = \"23\"" in text
+    assert "codexMateMenuVersion = \"24\"" in text
+    assert "codexMateTriggerInstalled = \"24\"" in text
     assert "codexMateFileButtonVersion" not in text
     assert "function visibleRightPanelLeft" in text
     assert "[role='tabpanel'], .absolute.top-0.bottom-0.left-0" in text

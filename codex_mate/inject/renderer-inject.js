@@ -17,7 +17,7 @@
   const timelineMaxTopPercent = 98;
   const timelineMaxMarkerGapPercent = 3.5;
   const styleId = "codex-delete-style";
-  const codexDeleteStyleVersion = "13";
+  const codexDeleteStyleVersion = "14";
   const codexMateMenuId = "codex-mate-menu";
   const codexDeleteVersion = "6";
   const codexExportVersion = "1";
@@ -32,8 +32,8 @@
   const chatsSortDbRefreshIntervalMs = 20000;
   const codexMateVersion = window.__CODEX_MATE_VERSION__ || "dev";
   const codexMateSettingsKey = "codexMateSettings";
-  const codexMateMenuVersion = "23";
-  const codexMateTriggerInstalled = "23";
+  const codexMateMenuVersion = "24";
+  const codexMateTriggerInstalled = "24";
   const codexConversationTimelineVersion = "1";
   const codexThreadScrollVersion = "1";
   const codexThreadScrollKey = "codexMateThreadScroll";
@@ -569,6 +569,79 @@
         display: grid;
         gap: 12px;
       }
+      .codex-mate-cc-switch-card {
+        display: grid;
+        gap: 10px;
+        border: 1px solid var(--codex-mate-popover-border);
+        border-radius: 10px;
+        background: var(--codex-mate-card-bg);
+        padding: 11px 12px;
+      }
+      .codex-mate-cc-switch-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .codex-mate-cc-switch-title {
+        color: var(--codex-mate-popover-fg);
+        font-size: 13px;
+        font-weight: 650;
+        line-height: 18px;
+      }
+      .codex-mate-cc-switch-description,
+      .codex-mate-cc-switch-status,
+      .codex-mate-cc-switch-meta {
+        color: var(--codex-mate-popover-muted);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+      .codex-mate-cc-switch-status[data-status="ok"] { color: var(--codex-mate-status-ok); }
+      .codex-mate-cc-switch-status[data-status="failed"] { color: var(--codex-mate-status-failed); }
+      .codex-mate-cc-switch-status[data-status="checking"],
+      .codex-mate-cc-switch-status[data-status="saving"] { color: var(--codex-mate-status-checking); }
+      .codex-mate-cc-switch-list {
+        display: grid;
+        gap: 8px;
+      }
+      .codex-mate-cc-switch-empty {
+        border: 1px dashed var(--codex-mate-popover-border);
+        border-radius: 8px;
+        color: var(--codex-mate-popover-muted);
+        padding: 10px;
+        font-size: 12px;
+        line-height: 1.45;
+      }
+      .codex-mate-cc-switch-item {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        gap: 10px;
+        border: 1px solid var(--codex-mate-popover-border);
+        border-radius: 8px;
+        background: var(--codex-mate-popover-bg);
+        padding: 9px 10px;
+      }
+      .codex-mate-cc-switch-name {
+        color: var(--codex-mate-popover-fg);
+        font-size: 13px;
+        font-weight: 600;
+        line-height: 18px;
+        word-break: break-word;
+      }
+      .codex-mate-cc-switch-badge {
+        display: inline-flex;
+        align-items: center;
+        min-height: 20px;
+        border: 1px solid var(--codex-mate-success-border);
+        border-radius: 999px;
+        background: var(--codex-mate-success-soft);
+        color: var(--codex-mate-status-ok);
+        padding: 0 7px;
+        font-size: 11px;
+        line-height: 18px;
+        margin-left: 6px;
+      }
       .codex-mate-provider-modes {
         display: grid;
         grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -640,7 +713,8 @@
       .codex-mate-provider-status[data-status="saving"] { color: var(--codex-mate-status-checking); }
       @media (max-width: 560px) {
         .codex-mate-provider-modes,
-        .codex-mate-provider-grid {
+        .codex-mate-provider-grid,
+        .codex-mate-cc-switch-item {
           grid-template-columns: 1fr;
         }
       }
@@ -802,7 +876,7 @@
       sessionDelete: true,
       markdownExport: true,
       projectMove: true,
-      conversationTimeline: true,
+      conversationTimeline: false,
       threadScrollRestore: true,
       nativeMenuPlacement: true,
     };
@@ -821,6 +895,7 @@
       next.pluginEntryUnlock = true;
       next.forcePluginInstall = true;
     }
+    next.conversationTimeline = false;
     return next;
   }
 
@@ -1059,6 +1134,117 @@
     scan();
   }
 
+  let codexMateCcSwitchStatus = { status: "checking", message: "正在读取 CC Switch 供应商…" };
+  let codexMateCcSwitchPayload = null;
+  let codexMateCcSwitchApplyingSourceId = "";
+
+  function ccSwitchModeLabel(mode) {
+    if (mode === "official") return "官方登录";
+    if (mode === "mixed-api") return "保留登录态 + API";
+    if (mode === "pure-api") return "纯 API";
+    return "未知模式";
+  }
+
+  function ccSwitchProviderMeta(provider) {
+    const parts = [ccSwitchModeLabel(provider?.mode)];
+    if (provider?.base_url) parts.push(provider.base_url);
+    if (provider?.wire_api) parts.push(`Wire API: ${provider.wire_api}`);
+    parts.push(provider?.api_key_present ? "已保存 API Key" : "无 API Key");
+    return parts.filter(Boolean).join(" · ");
+  }
+
+  function renderCcSwitchProviders() {
+    const status = codexMateCcSwitchStatus.status || "ok";
+    const providers = Array.isArray(codexMateCcSwitchPayload?.providers) ? codexMateCcSwitchPayload.providers : [];
+    document.querySelectorAll("[data-codex-mate-cc-switch-status]").forEach((node) => {
+      node.dataset.status = status;
+      node.textContent = codexMateCcSwitchStatus.message || codexMateCcSwitchPayload?.message || "CC Switch 供应商已同步";
+    });
+    document.querySelectorAll("[data-codex-mate-cc-switch-refresh]").forEach((button) => {
+      button.disabled = status === "checking" || status === "saving";
+      button.textContent = status === "checking" ? "读取中…" : "刷新";
+    });
+    document.querySelectorAll("[data-codex-mate-cc-switch-list]").forEach((list) => {
+      if (status === "checking" && !providers.length) {
+        list.innerHTML = `<div class="codex-mate-cc-switch-empty">正在读取 ~/.cc-switch/cc-switch.db…</div>`;
+        return;
+      }
+      if (!providers.length) {
+        list.innerHTML = `<div class="codex-mate-cc-switch-empty">${escapeHtml(codexMateCcSwitchStatus.message || codexMateCcSwitchPayload?.message || "没有可用的 Codex 供应商。")}</div>`;
+        return;
+      }
+      list.innerHTML = providers.map((provider) => {
+        const sourceId = String(provider?.source_id || "");
+        const isApplying = status === "saving" && codexMateCcSwitchApplyingSourceId === sourceId;
+        const isCurrent = provider?.is_current === true;
+        const disabled = status === "checking" || status === "saving" || isCurrent;
+        const buttonText = isApplying ? "正在切换…" : isCurrent ? "当前启用" : "切换";
+        const badge = isCurrent ? `<span class="codex-mate-cc-switch-badge">当前</span>` : "";
+        return `
+          <div class="codex-mate-cc-switch-item">
+            <div>
+              <div class="codex-mate-cc-switch-name">${escapeHtml(provider?.name || sourceId || "未命名供应商")}${badge}</div>
+              <div class="codex-mate-cc-switch-meta">${escapeHtml(ccSwitchProviderMeta(provider))}</div>
+            </div>
+            <button type="button" class="codex-mate-action-button" data-codex-mate-cc-switch-apply="${escapeHtml(sourceId)}"${disabled ? " disabled" : ""}>${buttonText}</button>
+          </div>
+        `;
+      }).join("");
+    });
+  }
+
+  async function checkCodexMateCcSwitchProviders() {
+    codexMateCcSwitchStatus = { status: "checking", message: "正在读取 CC Switch 供应商…" };
+    renderCcSwitchProviders();
+    try {
+      const result = await withTimeout(postJson("/cc-switch/providers", {}), 3500, "CC Switch 读取超时");
+      if (result?.status === "failed") throw new Error(result.message || "CC Switch 供应商读取失败");
+      codexMateCcSwitchPayload = result || null;
+      codexMateCcSwitchStatus = { status: "ok", message: result?.message || "CC Switch 供应商已同步" };
+    } catch (error) {
+      codexMateCcSwitchStatus = { status: "failed", message: bridgeErrorMessage(error, "CC Switch 供应商读取失败") };
+    }
+    renderCcSwitchProviders();
+  }
+
+  async function applyCodexMateCcSwitchProvider(sourceId) {
+    if (!sourceId) return;
+    codexMateCcSwitchApplyingSourceId = sourceId;
+    codexMateCcSwitchStatus = { status: "saving", message: "正在切换 CC Switch 供应商…" };
+    renderCcSwitchProviders();
+    try {
+      const result = await withTimeout(postJson("/cc-switch/apply", { source_id: sourceId }), 12000, "CC Switch 切换超时");
+      if (result?.status === "failed") throw new Error(result?.message || "CC Switch 供应商切换失败");
+      codexMateProviderProfileDirty = false;
+      if (result?.profile) {
+        codexMateProviderProfilePayload = result;
+        fillProviderProfileForm(result.profile);
+      }
+      applyCodexMateAuthModePayload(result);
+      codexMateAuthModePayload = result || codexMateAuthModePayload;
+      codexMateAuthModeStatus = { status: "ok", message: result?.message || "增强模式已同步" };
+      codexMateProviderProfileStatus = { status: "ok", message: result?.message || "供应商已切换" };
+      codexMateCcSwitchStatus = { status: "ok", message: result?.message || "CC Switch 供应商已切换" };
+      showToast(result?.message || "CC Switch 供应商已切换", null);
+      await Promise.allSettled([
+        checkCodexMateCcSwitchProviders(),
+        checkCodexMateProviderProfileStatus(),
+        checkCodexMateAuthModeStatus(),
+        checkBackendStatus(),
+      ]);
+    } catch (error) {
+      codexMateCcSwitchStatus = { status: "failed", message: bridgeErrorMessage(error, "CC Switch 供应商切换失败") };
+      showToast(codexMateCcSwitchStatus.message, null);
+    } finally {
+      codexMateCcSwitchApplyingSourceId = "";
+      renderCodexMateMenu();
+      renderAuthModeStatus();
+      renderProviderProfileStatus();
+      renderCcSwitchProviders();
+      scan();
+    }
+  }
+
   let codexMateBackendStatus = { status: "checking", message: "正在检查后端…" };
 
   function renderBackendStatus() {
@@ -1119,6 +1305,8 @@
   function bridgeFallbackTimeoutMs(path) {
     if (path === "/backend/status") return 700;
     if (path === "/provider-profile/status" || path === "/auth-enhancement-mode/status") return 1200;
+    if (path === "/cc-switch/providers") return 1200;
+    if (path === "/cc-switch/apply") return 2500;
     return 2500;
   }
 
@@ -1187,6 +1375,17 @@
               <div class="codex-mate-mode-title">供应商配置</div>
               <div class="codex-mate-mode-description">在这里填 API，不需要手动改 config.toml 或 auth.json。</div>
             </div>
+            <div class="codex-mate-cc-switch-card">
+              <div class="codex-mate-cc-switch-header">
+                <div>
+                  <div class="codex-mate-cc-switch-title">CC Switch 速切</div>
+                  <div class="codex-mate-cc-switch-description">读取 ~/.cc-switch/cc-switch.db 中的 Codex 供应商。</div>
+                </div>
+                <button type="button" class="codex-mate-action-button" data-codex-mate-cc-switch-refresh="true">刷新</button>
+              </div>
+              <div class="codex-mate-cc-switch-status" data-codex-mate-cc-switch-status="true" data-status="checking">正在读取 CC Switch 供应商…</div>
+              <div class="codex-mate-cc-switch-list" data-codex-mate-cc-switch-list="true"></div>
+            </div>
             <div class="codex-mate-provider-form">
               <div class="codex-mate-provider-modes" role="group" aria-label="供应商模式">
                 <button type="button" class="codex-mate-provider-mode" data-codex-mate-provider-mode="official">官方登录<br><span>不写 API Key</span></button>
@@ -1236,10 +1435,6 @@
           <div class="codex-mate-row">
             <div><div class="codex-mate-row-title">会话移动</div><div class="codex-mate-row-description">在会话列表悬停显示移动按钮，可移到普通对话或其他项目。</div></div>
             <button type="button" class="codex-mate-toggle" data-codex-mate-setting="projectMove"><span></span></button>
-          </div>
-          <div class="codex-mate-row">
-            <div><div class="codex-mate-row-title">对话时间线</div><div class="codex-mate-row-description">在右侧显示用户问题标记，点击即可跳到对应位置。</div></div>
-            <button type="button" class="codex-mate-toggle" data-codex-mate-setting="conversationTimeline"><span></span></button>
           </div>
           <div class="codex-mate-row">
             <div><div class="codex-mate-row-title">滚动位置恢复</div><div class="codex-mate-row-description">切换会话时记住上次阅读位置。</div></div>
@@ -1310,6 +1505,16 @@
         void applyCodexMateProviderProfile();
         return;
       }
+      const ccSwitchRefreshButton = closestElement(event.target, "[data-codex-mate-cc-switch-refresh]");
+      if (ccSwitchRefreshButton) {
+        void checkCodexMateCcSwitchProviders();
+        return;
+      }
+      const ccSwitchApplyButton = closestElement(event.target, "[data-codex-mate-cc-switch-apply]");
+      if (ccSwitchApplyButton) {
+        void applyCodexMateCcSwitchProvider(ccSwitchApplyButton.getAttribute("data-codex-mate-cc-switch-apply"));
+        return;
+      }
       const refreshAuthButton = closestElement(event.target, "[data-codex-mate-refresh-auth]");
       if (refreshAuthButton) {
         void checkCodexMateAuthModeStatus();
@@ -1346,8 +1551,10 @@
     renderCodexMateMenu();
     renderAuthModeStatus();
     renderProviderProfileStatus();
+    renderCcSwitchProviders();
     renderBackendStatus();
     void checkCodexMateProviderProfileStatus();
+    void checkCodexMateCcSwitchProviders();
     void checkCodexMateAuthModeStatus();
     void checkBackendStatus();
   }
@@ -3134,35 +3341,7 @@
   }
 
   function refreshConversationTimeline() {
-    if (!codexMateSettings().conversationTimeline) {
-      removeConversationTimeline();
-      return;
-    }
-    const questions = prepareTimelineQuestions(conversationTimelineQuestions());
-    if (questions.length === 0) {
-      removeConversationTimeline();
-      return;
-    }
-    const signature = timelineSignature(questions);
-    const existing = document.querySelector(`.${timelineClass}`);
-    if (
-      existing?.dataset.codexConversationTimelineVersion === codexConversationTimelineVersion &&
-      existing?.dataset.codexConversationTimelineSignature === signature
-    ) {
-      return;
-    }
     removeConversationTimeline();
-    const container = document.createElement("div");
-    container.className = timelineClass;
-    container.dataset.codexConversationTimelineVersion = codexConversationTimelineVersion;
-    container.dataset.codexConversationTimelineSignature = signature;
-    const track = document.createElement("div");
-    track.className = timelineTrackClass;
-    container.appendChild(track);
-    questions.forEach((question) => {
-      container.appendChild(createConversationTimelineMarker(question));
-    });
-    document.body.appendChild(container);
   }
 
   function readThreadScrollEntries() {

@@ -8,6 +8,8 @@ from pathlib import Path
 import re
 from typing import Any
 
+from codex_mate import cc_switch, history_sync
+
 
 REMOTE_FEATURE_FLAGS = (
     "local_remote_dropdown",
@@ -555,6 +557,113 @@ def apply_provider_profile(
         "provider_mode": provider_status,
         "auth_enhancement_mode": status["auth_enhancement_mode"],
         "message": message,
+    }
+
+
+def cc_switch_providers_status(
+    codex_home: str | Path | None = None,
+    *,
+    cc_switch_home: str | Path | None = None,
+) -> dict[str, object]:
+    db_path = cc_switch.default_db_path(cc_switch_home)
+    settings_path = cc_switch.default_settings_path(cc_switch_home)
+    login_ready = provider_mode_status(codex_home).get("chatgpt_login_token_present") is True
+    try:
+        providers = cc_switch.list_codex_providers(db_path, login_ready=login_ready)
+    except Exception as exc:
+        return {
+            "status": "failed",
+            "message": f"读取 CC Switch 供应商失败：{exc}",
+            "db_path": str(db_path),
+            "settings_path": str(settings_path),
+            "providers": [],
+        }
+    if not db_path.exists():
+        message = "未找到 CC Switch 数据库。"
+    elif not providers:
+        message = "没有可用的 CC Switch Codex 供应商。"
+    else:
+        message = f"已读取 CC Switch Codex 供应商：{len(providers)} 个。"
+    return {
+        "status": "ok",
+        "message": message,
+        "db_path": str(db_path),
+        "settings_path": str(settings_path),
+        "providers": providers,
+    }
+
+
+def apply_cc_switch_provider(
+    codex_home: str | Path | None = None,
+    *,
+    settings_home: str | Path | None = None,
+    cc_switch_home: str | Path | None = None,
+    source_id: str,
+) -> dict[str, object]:
+    db_path = cc_switch.default_db_path(cc_switch_home)
+    settings_path = cc_switch.default_settings_path(cc_switch_home)
+    login_ready = provider_mode_status(codex_home).get("chatgpt_login_token_present") is True
+    try:
+        provider = cc_switch.get_codex_provider(db_path, source_id, login_ready=login_ready)
+    except Exception as exc:
+        return {
+            "status": "failed",
+            "message": f"CC Switch 供应商读取失败：{exc}",
+            "source_id": source_id,
+            "db_path": str(db_path),
+            "settings_path": str(settings_path),
+        }
+
+    profile = cc_switch.profile_from_provider(provider)
+    try:
+        result = apply_provider_profile(codex_home, settings_home=settings_home, profile=profile)
+    except Exception as exc:
+        return {
+            "status": "failed",
+            "message": f"CC Switch 供应商切换失败：{exc}",
+            "source_id": source_id,
+            "cc_switch_provider": cc_switch.sanitized_provider(provider),
+            "db_path": str(db_path),
+            "settings_path": str(settings_path),
+        }
+    if result.get("status") == "failed":
+        return {
+            **result,
+            "source_id": source_id,
+            "cc_switch_provider": cc_switch.sanitized_provider(provider),
+            "db_path": str(db_path),
+            "settings_path": str(settings_path),
+        }
+
+    try:
+        cc_switch_changed = cc_switch.set_current_codex_provider(db_path, settings_path, source_id)
+    except Exception as exc:
+        return {
+            **result,
+            "status": "failed",
+            "source_id": source_id,
+            "cc_switch_provider": cc_switch.sanitized_provider(provider),
+            "message": f"Codex 已切换，但同步 CC Switch 当前供应商失败：{exc}",
+            "db_path": str(db_path),
+            "settings_path": str(settings_path),
+        }
+
+    try:
+        history_result = history_sync.sync_history_if_ready(history_sync.resolve_paths(codex_home))
+    except Exception as exc:
+        history_result = {"status": "failed", "message": str(exc)}
+
+    status = "updated" if cc_switch_changed or result.get("status") == "updated" else str(result.get("status") or "skipped")
+    return {
+        **result,
+        "status": status,
+        "source_id": source_id,
+        "cc_switch_provider": cc_switch.sanitized_provider(provider),
+        "cc_switch_current_updated": cc_switch_changed,
+        "history_sync": history_result,
+        "db_path": str(db_path),
+        "settings_path": str(settings_path),
+        "message": result.get("message") or f"已切换到 {provider['name']}。",
     }
 
 

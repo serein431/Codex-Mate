@@ -150,6 +150,12 @@ class ApiFirstDeleteService:
     def apply_provider_profile(self, profile: dict[str, object]) -> dict[str, object]:
         return native_features.apply_provider_profile(profile=profile)
 
+    def cc_switch_providers(self) -> dict[str, object]:
+        return native_features.cc_switch_providers_status()
+
+    def apply_cc_switch_provider(self, source_id: str) -> dict[str, object]:
+        return native_features.apply_cc_switch_provider(source_id=source_id)
+
     def move_thread_workspace(self, session: SessionRef, target_cwd: str) -> dict[str, object]:
         if self.local_adapter is None:
             return {"status": "failed", "session_id": session.session_id, "message": "No local database configured"}
@@ -591,4 +597,8 @@ def handle_bridge_request(service: ApiFirstDeleteService, path: str, payload: di
         raw_profile = payload.get("profile", {})
         profile = raw_profile if isinstance(raw_profile, dict) else {}
         return service.apply_provider_profile(profile)
+    if path == "/cc-switch/providers":
+        return service.cc_switch_providers()
+    if path == "/cc-switch/apply":
+        return service.apply_cc_switch_provider(str(payload.get("source_id", "")))
     return {"status": DeleteStatus.FAILED.value, "session_id": str(payload.get("session_id", "")), "message": "Unknown bridge path"}

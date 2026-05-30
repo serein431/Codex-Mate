@@ -23,7 +23,8 @@ Codex Mate 是一个给 Codex App 使用的本地增强工具。它通过外部 
 - 在会话列表悬停导出当前对话为 Markdown
 - 在会话列表悬停移动会话到普通对话或其他项目
 - 删除前确认，并支持撤销
-- 在对话右侧显示问题时间线，并记住每个会话的滚动位置
+- CM 面板内支持 CC Switch 速切，直接读取本机 Codex 供应商
+- 记住每个会话的滚动位置，切回会话时尽量回到上次阅读处
 - 切换账号、provider 或模型后，帮助恢复本机已有聊天记录的侧边栏显示
 - 支持官方登录、官方登录混入 API Key、纯 API 三种 provider 模式
 - 支持 Windows / macOS 安装、更新、卸载和诊断日志导出
@@ -38,7 +39,8 @@ Codex Mate 是一个给 Codex App 使用的本地增强工具。它通过外部 
 - 新增 provider 模式管理：支持 `official`、`mixed-api`、`pure-api` 三种模式，并提供命令行精确切换。
 - 改进移动端 / Remote 检查：`doctor --json` 会说明原生入口是否满足显示条件，以及缺的是登录态、API Key 状态、provider 配置还是 Remote feature flags。
 - 改进历史同步：切换账号、provider 或模型后，尽量把本机已有会话重新对齐到当前配置。
-- 改进会话管理：支持删除、撤销、Markdown 导出、会话移动、对话时间线和滚动位置恢复。
+- 新增 CC Switch 速切：CM 面板可读取 `~/.cc-switch/cc-switch.db` 中的 Codex 供应商，并一键切换到 Codex Mate 的 provider 配置。
+- 改进会话管理：支持删除、撤销、Markdown 导出、会话移动和滚动位置恢复。
 - 改进安装体验：Windows / macOS 都提供独立平台包；普通用户不需要准备 Python。
 
 ## 推荐使用路径
@@ -355,6 +357,14 @@ python -m codex_mate provider-mode pure-api \
 
 启动 Codex Mate 不会自动切换 provider 模式。需要切换时，请在 CM 面板点击“切换供应商”，或显式运行上面的命令。
 
+### CC Switch 速切
+
+如果你已经使用 CC Switch 管理 Codex 供应商，CM 面板会在“供应商配置”上方显示“CC Switch 速切”。
+
+Codex Mate 会直接读取本机 `~/.cc-switch/cc-switch.db` 里的 `app_type = "codex"` 供应商，展示名称、当前启用状态、模式、Base URL、Wire API 和 API Key 是否存在。点击“切换”后，Codex Mate 会把对应供应商写入当前 Codex 的 `config.toml` / `auth.json`，同步 CC Switch 的当前供应商状态，并顺手触发一次轻量历史同步。
+
+如果没有安装 CC Switch、数据库不存在，或还没有 Codex 供应商，面板会显示空状态，不会卡住 Codex。
+
 ### 会话删除
 
 会话列表悬停时会出现“删除”按钮。点击后会先弹出确认框，删除成功后会显示提示，并尽量支持撤销。
@@ -373,11 +383,9 @@ python -m codex_mate provider-mode pure-api \
 
 移动会同步本机 SQLite、rollout 文件和 Codex 的侧边栏状态文件。界面会尽量马上把这一行挪到目标位置；如果当前侧边栏没有展开或没有对应目标，重启或刷新 Codex 后也会按新的归属显示。
 
-### 对话时间线与滚动恢复
+### 滚动位置恢复
 
-对话页右侧会显示用户问题时间线。长对话里可以直接点击标记跳到对应问题，少翻很多屏。
-
-Codex Mate 也会记住每个会话的阅读位置。切换到别的会话再回来时，会尽量回到上次看到的位置，避免 Codex 自动滚到最底部。
+Codex Mate 会记住每个会话的阅读位置。切换到别的会话再回来时，会尽量回到上次看到的位置，避免 Codex 自动滚到最底部。
 
 ### 检查更新
 
@@ -519,7 +527,7 @@ python -m codex_mate doctor --json
 
 ### 移动端或 Remote 入口不见了
 
-移动端和 Remote 入口属于 Codex 原生功能。Codex Mate 不会删除这些入口；它只通过外部启动和注入增强菜单、插件入口、会话删除、导出、移动和时间线。
+移动端和 Remote 入口属于 Codex 原生功能。Codex Mate 不会删除这些入口；它只通过外部启动和注入增强菜单、插件入口、会话删除、导出、移动和滚动恢复。
 
 如果更新或切换 provider 后这两个入口消失，先运行：
 

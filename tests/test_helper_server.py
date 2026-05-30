@@ -13,6 +13,7 @@ class FakeDeleteService:
         self.undone = []
         self.archived_title_queries = []
         self.moved = []
+        self.cc_switch_applied = []
 
     def delete(self, session: SessionRef):
         self.deleted.append(session)
@@ -49,6 +50,18 @@ class FakeDeleteService:
 
     def apply_provider_profile(self, profile: dict[str, object]):
         return {"status": "updated", "profile": profile, "auth_enhancement_mode": "loginPreserving"}
+
+    def cc_switch_providers(self):
+        return {"status": "ok", "providers": [{"source_id": "p1", "name": "Relay"}]}
+
+    def apply_cc_switch_provider(self, source_id: str):
+        self.cc_switch_applied.append(source_id)
+        return {
+            "status": "updated",
+            "source_id": source_id,
+            "profile": {"provider": "jmrai"},
+            "auth_enhancement_mode": "loginPreserving",
+        }
 
     def move_thread_workspace(self, session: SessionRef, target_cwd: str):
         self.moved.append((session, target_cwd))
@@ -188,8 +201,27 @@ def test_helper_server_routes_provider_profile():
 
     assert status["profile"]["mode"] == "mixed-api"
     assert applied["status"] == "updated"
+
+
+def test_helper_server_routes_cc_switch_provider_actions():
+    service = FakeDeleteService()
+    server = HelperServer("127.0.0.1", 0, service)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base = f"http://127.0.0.1:{server.port}"
+        providers = post_json(base + "/cc-switch/providers", {})
+        applied = post_json(base + "/cc-switch/apply", {"source_id": "p1"})
+    finally:
+        server.shutdown()
+        thread.join(timeout=3)
+
+    assert providers["providers"] == [{"source_id": "p1", "name": "Relay"}]
+    assert applied["status"] == "updated"
+    assert applied["source_id"] == "p1"
     assert applied["profile"]["provider"] == "jmrai"
     assert applied["auth_enhancement_mode"] == "loginPreserving"
+    assert service.cc_switch_applied == ["p1"]
 
 
 def test_helper_server_routes_session_move_and_sort_keys():
