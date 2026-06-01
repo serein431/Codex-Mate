@@ -57,6 +57,25 @@ def test_rollout_reader_keeps_empty_user_message_for_timeline(tmp_path):
     assert result.messages[0].body == ""
 
 
+def test_rollout_reader_attaches_turn_id_to_messages(tmp_path):
+    rollout = tmp_path / "rollout.jsonl"
+    rollout.write_text(
+        '{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-1"}}\n'
+        '{"type":"turn_context","payload":{"turn_id":"turn-1"}}\n'
+        '{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"第一条"}]}}\n'
+        '{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"回答"}]}}\n'
+        '{"type":"event_msg","payload":{"type":"task_started","turn_id":"turn-2"}}\n'
+        '{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"第二条"}]}}\n',
+        encoding="utf-8",
+    )
+    db_path = tmp_path / "state_5.sqlite"
+    create_thread_db(db_path, rollout)
+
+    result = read_thread_rollout(db_path, SessionRef(session_id="t1", title="Fallback"))
+
+    assert [message.turn_id for message in result.messages] == ["turn-1", "turn-1", "turn-2"]
+
+
 def test_rollout_reader_reports_missing_database(tmp_path):
     missing_db = tmp_path / "missing.sqlite"
 

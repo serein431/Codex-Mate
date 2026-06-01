@@ -554,14 +554,25 @@ class SQLiteStorageAdapter:
                 if isinstance(item, str) and item in variants:
                     changed = True
                     continue
+                if isinstance(item, dict) and self._object_identifies_thread(item, variants):
+                    changed = True
+                    continue
                 next_item, item_changed = self._remove_thread_keys_and_list_values(item, variants)
                 cleaned_list.append(next_item)
                 changed = changed or item_changed
             return cleaned_list, changed
         return value, False
 
+    def _object_identifies_thread(self, value: dict[str, Any], variants: set[str]) -> bool:
+        for key in ("id", "thread_id", "threadId", "session_id", "sessionId", "conversation_id", "conversationId"):
+            if isinstance(value.get(key), str) and value[key] in variants:
+                return True
+        return False
+
     def _contains_thread_keys_or_list_values(self, value: Any, variants: set[str]) -> bool:
         if isinstance(value, dict):
+            if self._object_identifies_thread(value, variants):
+                return True
             for key, item in value.items():
                 if isinstance(key, str) and key in variants:
                     return True

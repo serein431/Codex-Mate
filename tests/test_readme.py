@@ -43,7 +43,7 @@ def test_readme_describes_2_0_user_path_and_storage_locations():
     text = Path("README.md").read_text(encoding="utf-8")
 
     assert "## 2.1 更新重点" in text
-    assert "完整用户提问目录" in text
+    assert "右侧问题节点" in text
     assert "## 2.0 更新重点" in text
     assert "状态驱动的增强模式面板" in text
     assert "没检测到 ChatGPT token 时，不会把“保持登录态”写成已启用" in text
@@ -178,9 +178,10 @@ def test_readme_describes_export_cc_switch_and_scroll_restore():
     assert "读取本机 `state_5.sqlite`" in text
     assert "### 会话移动" in text
     assert "侧边栏里已有的项目" in text
-    assert "### 完整对话目录" in text
+    assert "### 对话节点预览" in text
     assert "读取本机 `state_5.sqlite` 和当前会话对应的 rollout 文件" in text
-    assert "完整用户提问目录" in text
+    assert "右侧原点" in text
+    assert "默认最多显示 30 条" in text
     assert "### 滚动位置恢复" in text
     assert "上次看到的位置" in text
     assert "用户问题时间线" not in text

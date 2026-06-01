@@ -115,6 +115,38 @@ def test_delete_codex_thread_schema_removes_codex_sidecar_indexes(tmp_path):
     assert "keep" in global_state
 
 
+def test_delete_codex_thread_schema_removes_thread_objects_from_global_state_lists(tmp_path):
+    db_path = tmp_path / "state_5.sqlite"
+    rollout_path = tmp_path / "rollout.jsonl"
+    rollout_path.write_text('{"type":"message"}\n', encoding="utf-8")
+    create_codex_thread_db(db_path, rollout_path)
+    (tmp_path / ".codex-global-state.json").write_text(
+        json.dumps(
+            {
+                "project-thread-order": [
+                    {"id": "local:t1", "title": "Codex Thread"},
+                    {"threadId": "keep", "title": "Keep"},
+                ],
+                "thread-recents": [
+                    {"session_id": "t1", "label": "Codex Thread"},
+                    {"sessionId": "keep", "label": "Keep"},
+                ],
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    adapter = SQLiteStorageAdapter(db_path, BackupStore(tmp_path / "backups"))
+
+    result = adapter.delete_local(SessionRef(session_id="t1", title="Codex Thread"))
+
+    assert result.status == DeleteStatus.LOCAL_DELETED
+    state = json.loads((tmp_path / ".codex-global-state.json").read_text(encoding="utf-8"))
+    assert state["project-thread-order"] == [{"threadId": "keep", "title": "Keep"}]
+    assert state["thread-recents"] == [{"sessionId": "keep", "label": "Keep"}]
+
+
 def test_delete_codex_thread_schema_removes_unused_workspace_roots(tmp_path):
     db_path = tmp_path / "state_5.sqlite"
     rollout_path = tmp_path / "rollout.jsonl"

@@ -12,15 +12,12 @@
   const timelineMarkerClass = "codex-conversation-timeline-marker";
   const timelineTooltipClass = "codex-conversation-timeline-tooltip";
   const timelineTargetClass = "codex-conversation-timeline-target";
-  const timelinePanelClass = "codex-conversation-timeline-panel";
-  const timelineListClass = "codex-conversation-timeline-list";
-  const timelineItemClass = "codex-conversation-timeline-item";
-  const timelineQuestionLimit = 40;
+  const timelineQuestionLimit = 96;
   const timelineMinTopPercent = 2;
   const timelineMaxTopPercent = 98;
   const timelineMaxMarkerGapPercent = 3.5;
   const styleId = "codex-delete-style";
-  const codexDeleteStyleVersion = "15";
+  const codexDeleteStyleVersion = "21";
   const codexMateMenuId = "codex-mate-menu";
   const codexDeleteVersion = "6";
   const codexExportVersion = "1";
@@ -28,16 +25,18 @@
   const codexActionGroupVersion = "2";
   const codexArchiveDeleteAllVersion = "2";
   const projectMoveProjectionKey = "codexMateProjectMoveProjection";
+  const deletedSessionTombstoneKey = "codexMateDeletedSessions";
   const projectMoveProjectionTtlMs = 7 * 24 * 60 * 60 * 1000;
+  const deletedSessionTombstoneTtlMs = 5 * 60 * 1000;
   const projectMoveProjectionSettleMs = 2500;
   const projectMoveRefreshDelaysMs = [80, 250, 700, 1500, 3000];
   const chatsSortRefreshIntervalMs = 5000;
   const chatsSortDbRefreshIntervalMs = 20000;
   const codexMateVersion = window.__CODEX_MATE_VERSION__ || "dev";
   const codexMateSettingsKey = "codexMateSettings";
-  const codexMateMenuVersion = "25";
-  const codexMateTriggerInstalled = "25";
-  const codexConversationTimelineVersion = "2";
+  const codexMateMenuVersion = "26";
+  const codexMateTriggerInstalled = "26";
+  const codexConversationTimelineVersion = "13";
   const codexThreadScrollVersion = "1";
   const codexThreadScrollKey = "codexMateThreadScroll";
   const codexThreadScrollMaxEntries = 120;
@@ -48,6 +47,7 @@
   const codexThreadScrollRouteHooksVersion = "1";
   const codexThreadScrollUserIntentVersion = "1";
   const codexProjectMoveRuntimeId = `${Date.now()}-${Math.random()}`;
+  const codexMateChromeGateVersion = "1";
   window.__codexProjectMoveRuntimeId = codexProjectMoveRuntimeId;
   clearTimeout(window.__codexProjectMoveProjectionTimer);
   window.__codexProjectMoveProjectionTimer = null;
@@ -63,6 +63,14 @@
   window.__codexConversationTimelineNodeCounter = window.__codexConversationTimelineNodeCounter || 0;
   window.__codexConversationTimelineCache = window.__codexConversationTimelineCache || {};
   window.__codexConversationTimelineInflight = window.__codexConversationTimelineInflight || {};
+  if (window.__codexConversationTimelineRuntimeVersion !== codexConversationTimelineVersion) {
+    clearTimeout(window.__codexConversationTimelineRefreshTimer);
+    window.__codexConversationTimelineRefreshTimer = null;
+    window.__codexConversationTimelineCache = {};
+    window.__codexConversationTimelineInflight = {};
+    document.querySelectorAll(`.${timelineClass}, .${timelineTooltipClass}`).forEach((node) => node.remove());
+    window.__codexConversationTimelineRuntimeVersion = codexConversationTimelineVersion;
+  }
 
   function closestElement(target, selector) {
     const element = target?.nodeType === 1 ? target : target?.parentElement;
@@ -759,6 +767,24 @@
         gap: 8px;
         flex: 0 0 auto;
       }
+      .codex-mate-row-controls {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        flex: 0 0 auto;
+      }
+      .codex-mate-number-input {
+        width: 76px;
+        min-height: 30px;
+        border: 1px solid var(--codex-mate-input-border);
+        border-radius: 7px;
+        background: var(--codex-mate-input-bg);
+        color: var(--codex-mate-input-fg);
+        color-scheme: light;
+        padding: 4px 8px;
+        font: 13px/18px system-ui, sans-serif;
+        letter-spacing: 0;
+      }
       .codex-mate-action-button {
                 border: 1px solid var(--codex-mate-popover-border);
                 border-radius: 7px;
@@ -801,8 +827,16 @@
       .codex-mate-backend-label[data-status="failed"] { color: var(--codex-mate-status-failed); }
       :where(html.electron-dark, body.electron-dark, html.dark, body.dark, html[data-theme="dark"], body[data-theme="dark"], html[data-color-mode="dark"], body[data-color-mode="dark"]) .codex-mate-modal-content,
       :where(html.electron-dark, body.electron-dark, html.dark, body.dark, html[data-theme="dark"], body[data-theme="dark"], html[data-color-mode="dark"], body[data-color-mode="dark"]) .codex-mate-provider-field input,
-      :where(html.electron-dark, body.electron-dark, html.dark, body.dark, html[data-theme="dark"], body[data-theme="dark"], html[data-color-mode="dark"], body[data-color-mode="dark"]) .codex-mate-provider-field select {
+      :where(html.electron-dark, body.electron-dark, html.dark, body.dark, html[data-theme="dark"], body[data-theme="dark"], html[data-color-mode="dark"], body[data-color-mode="dark"]) .codex-mate-provider-field select,
+      :where(html.electron-dark, body.electron-dark, html.dark, body.dark, html[data-theme="dark"], body[data-theme="dark"], html[data-color-mode="dark"], body[data-color-mode="dark"]) .codex-mate-number-input {
         color-scheme: dark;
+      }
+      .${timelineClass},
+      .${timelineTooltipClass} {
+        --codex-timeline-surface: rgba(17,24,39,.96);
+        --codex-timeline-text: rgba(255,255,255,.98);
+        --codex-timeline-border: rgba(17,24,39,.22);
+        --codex-timeline-shadow: rgba(17,24,39,.22);
       }
       .${timelineClass} {
         position: fixed;
@@ -816,6 +850,22 @@
         font: 12px/16px system-ui, sans-serif;
         letter-spacing: 0;
       }
+      @media (prefers-color-scheme: dark) {
+        .${timelineClass},
+        .${timelineTooltipClass} {
+          --codex-timeline-surface: rgba(255,255,255,.98);
+          --codex-timeline-text: rgba(17,24,39,.96);
+          --codex-timeline-border: rgba(255,255,255,.45);
+          --codex-timeline-shadow: rgba(255,255,255,.18);
+        }
+      }
+      :where(html.electron-dark, body.electron-dark, html.dark, body.dark, html[data-theme="dark"], body[data-theme="dark"], html[data-color-mode="dark"], body[data-color-mode="dark"]) .${timelineClass},
+      :where(html.electron-dark, body.electron-dark, html.dark, body.dark, html[data-theme="dark"], body[data-theme="dark"], html[data-color-mode="dark"], body[data-color-mode="dark"]) .${timelineTooltipClass} {
+        --codex-timeline-surface: rgba(255,255,255,.98);
+        --codex-timeline-text: rgba(17,24,39,.96);
+        --codex-timeline-border: rgba(255,255,255,.45);
+        --codex-timeline-shadow: rgba(255,255,255,.18);
+      }
       .${timelineTrackClass} {
         position: absolute;
         top: 0;
@@ -824,8 +874,8 @@
         width: 2px;
         transform: translateX(-50%);
         border-radius: 999px;
-        background: var(--codex-mate-popover-border);
-        opacity: .78;
+        background: var(--codex-timeline-surface);
+        opacity: .92;
         pointer-events: none;
       }
       .${timelineMarkerClass} {
@@ -833,131 +883,46 @@
         left: 50%;
         width: 14px;
         height: 14px;
-        border: 1px solid var(--codex-mate-popover-bg);
+        border: 1px solid var(--codex-timeline-border);
         border-radius: 999px;
         transform: translate(-50%, -50%);
-        background: var(--codex-mate-success);
+        background: var(--codex-timeline-surface);
         cursor: pointer;
         pointer-events: auto;
-        box-shadow: 0 4px 16px var(--codex-mate-popover-shadow);
+        box-shadow: 0 4px 16px var(--codex-timeline-shadow);
       }
       .${timelineMarkerClass}:hover,
       .${timelineMarkerClass}:focus-visible,
       .${timelineMarkerClass}.codex-conversation-timeline-marker-active {
-        background: var(--codex-mate-popover-fg);
+        background: var(--codex-timeline-surface);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--codex-timeline-surface) 36%, transparent), 0 10px 28px var(--codex-timeline-shadow);
         outline: none;
       }
       .${timelineTooltipClass} {
-        position: absolute;
-        top: 50%;
-        right: 22px;
-        transform: translateY(-50%);
-        max-width: min(280px, calc(100vw - 72px));
-        border: 1px solid var(--codex-mate-popover-border);
-        border-radius: 8px;
-        background: var(--codex-mate-popover-bg);
-        color: var(--codex-mate-popover-fg);
+        position: fixed;
+        top: 0;
+        left: 0;
+        z-index: 2147482502;
+        transform: translate(-100%, -50%);
+        max-width: min(520px, calc(100vw - 96px));
+        border: 1px solid var(--codex-timeline-border);
+        border-radius: 10px;
+        background: var(--codex-timeline-surface);
+        color: var(--codex-timeline-text);
         font: 12px/16px system-ui, sans-serif;
-        padding: 7px 9px;
-        box-shadow: 0 14px 40px var(--codex-mate-popover-shadow);
+        padding: 5px 10px;
+        box-shadow: 0 14px 40px var(--codex-timeline-shadow);
         opacity: 0;
+        visibility: hidden;
         pointer-events: none;
         white-space: nowrap;
-        transition: opacity .12s ease;
-      }
-      .${timelineMarkerClass}:hover .${timelineTooltipClass},
-      .${timelineMarkerClass}:focus-visible .${timelineTooltipClass} { opacity: 1; }
-      .${timelinePanelClass} {
-        position: absolute;
-        top: 0;
-        right: 32px;
-        width: min(320px, calc(100vw - 72px));
-        max-height: min(520px, calc(100vh - 128px));
-        display: none;
-        grid-template-rows: auto 1fr;
-        overflow: hidden;
-        border: 1px solid var(--codex-mate-popover-border);
-        border-radius: 10px;
-        background: var(--codex-mate-popover-bg);
-        color: var(--codex-mate-popover-fg);
-        box-shadow: 0 20px 52px var(--codex-mate-popover-shadow);
-        pointer-events: auto;
-      }
-      .${timelineClass}:hover .${timelinePanelClass},
-      .${timelineClass}:focus-within .${timelinePanelClass},
-      .${timelineClass}[data-open="true"] .${timelinePanelClass} {
-        display: grid;
-      }
-      .codex-conversation-timeline-header {
-        display: grid;
-        gap: 2px;
-        padding: 10px 11px 8px;
-        border-bottom: 1px solid var(--codex-mate-popover-border);
-      }
-      .codex-conversation-timeline-title {
-        font-size: 13px;
-        font-weight: 650;
-        line-height: 18px;
-      }
-      .codex-conversation-timeline-subtitle {
-        color: var(--codex-mate-popover-muted);
-        font-size: 12px;
-        line-height: 16px;
-      }
-      .${timelineListClass} {
-        display: grid;
-        align-content: start;
-        gap: 3px;
-        overflow: auto;
-        padding: 6px;
-      }
-      .${timelineItemClass} {
-        width: 100%;
-        min-height: 38px;
-        display: grid;
-        grid-template-columns: 30px 1fr;
-        align-items: start;
-        gap: 8px;
-        border: 0;
-        border-radius: 7px;
-        background: transparent;
-        color: inherit;
-        padding: 7px 8px;
-        text-align: left;
-        cursor: pointer;
-        font: 12px/16px system-ui, sans-serif;
-        letter-spacing: 0;
-      }
-      .${timelineItemClass}:hover,
-      .${timelineItemClass}:focus-visible,
-      .${timelineItemClass}.codex-conversation-timeline-item-active {
-        background: var(--codex-mate-action-hover-bg);
-        outline: none;
-      }
-      .codex-conversation-timeline-number {
-        color: var(--codex-mate-popover-muted);
-        font-variant-numeric: tabular-nums;
-      }
-      .codex-conversation-timeline-preview {
-        min-width: 0;
-        color: var(--codex-mate-popover-fg);
         overflow: hidden;
         text-overflow: ellipsis;
-        white-space: nowrap;
+        transition: none;
       }
-      .codex-conversation-timeline-time {
-        grid-column: 2;
-        color: var(--codex-mate-popover-muted);
-        font-size: 11px;
-        line-height: 14px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .codex-conversation-timeline-empty {
-        color: var(--codex-mate-popover-muted);
-        padding: 10px;
-        line-height: 1.45;
+      .${timelineTooltipClass}[data-preview-open="true"] {
+        opacity: 1;
+        visibility: visible;
       }
       .${timelineTargetClass} {
         animation: codex-conversation-timeline-pulse 1.2s ease-out;
@@ -979,9 +944,20 @@
       markdownExport: true,
       projectMove: true,
       conversationTimeline: true,
+      conversationTimelineMaxItems: 30,
       threadScrollRestore: true,
       nativeMenuPlacement: true,
     };
+  }
+
+  function sanitizeConversationTimelineMaxItems(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) return 30;
+    return Math.max(1, Math.min(500, Math.round(numeric)));
+  }
+
+  function conversationTimelineMaxItems(settings = codexMateSettings()) {
+    return sanitizeConversationTimelineMaxItems(settings?.conversationTimelineMaxItems);
   }
 
   function normalizeCodexMateSettings(settings) {
@@ -997,6 +973,7 @@
       next.pluginEntryUnlock = true;
       next.forcePluginInstall = true;
     }
+    next.conversationTimelineMaxItems = conversationTimelineMaxItems(next);
     return next;
   }
 
@@ -1028,6 +1005,14 @@
     }
     renderCodexMateMenu();
     scan();
+  }
+
+  function setCodexMateNumberSetting(key, value) {
+    if (key !== "conversationTimelineMaxItems") return;
+    const next = normalizeCodexMateSettings({ ...codexMateSettings(), [key]: sanitizeConversationTimelineMaxItems(value) });
+    localStorage.setItem(codexMateSettingsKey, JSON.stringify(next));
+    renderCodexMateMenu();
+    scheduleConversationTimelineRefresh(0);
   }
 
   function applyCodexMateAuthMode(mode) {
@@ -1465,12 +1450,19 @@
     document.querySelectorAll("[data-codex-mate-auth-mode]").forEach((button) => {
       button.dataset.active = String(button.getAttribute("data-codex-mate-auth-mode") === settings.authEnhancementMode);
     });
+    document.querySelectorAll("[data-codex-mate-setting-number]").forEach((input) => {
+      const key = input.getAttribute("data-codex-mate-setting-number");
+      if (key === "conversationTimelineMaxItems" && document.activeElement !== input) {
+        input.value = String(conversationTimelineMaxItems(settings));
+      }
+    });
   }
 
   function openCodexMateModal() {
     document.querySelectorAll(".codex-mate-modal-overlay").forEach((node) => node.remove());
     document.querySelectorAll('[data-codex-mate-dialog="true"]').forEach((node) => node.remove());
     codexMateProviderProfileDirty = false;
+    const settings = codexMateSettings();
     const overlay = document.createElement("div");
     overlay.className = "codex-mate-modal-overlay";
     overlay.innerHTML = `
@@ -1547,8 +1539,11 @@
             <button type="button" class="codex-mate-toggle" data-codex-mate-setting="projectMove"><span></span></button>
           </div>
           <div class="codex-mate-row">
-            <div><div class="codex-mate-row-title">完整对话目录</div><div class="codex-mate-row-description">读取本地 rollout，展示完整用户提问目录。</div></div>
-            <button type="button" class="codex-mate-toggle" data-codex-mate-setting="conversationTimeline"><span></span></button>
+            <div><div class="codex-mate-row-title">对话节点预览</div><div class="codex-mate-row-description">读取本地 rollout，在右侧显示可跳转问题节点。</div></div>
+            <div class="codex-mate-row-controls">
+              <input class="codex-mate-number-input" data-codex-mate-setting-number="conversationTimelineMaxItems" type="number" min="1" max="500" step="1" value="${conversationTimelineMaxItems(settings)}" aria-label="对话节点最大显示条数">
+              <button type="button" class="codex-mate-toggle" data-codex-mate-setting="conversationTimeline"><span></span></button>
+            </div>
           </div>
           <div class="codex-mate-row">
             <div><div class="codex-mate-row-title">滚动位置恢复</div><div class="codex-mate-row-description">切换会话时记住上次阅读位置。</div></div>
@@ -1645,10 +1640,20 @@
       setCodexMateSetting(key, !codexMateSettings()[key]);
     }, true);
     overlay.addEventListener("input", (event) => {
+      const numberInput = closestElement(event.target, "[data-codex-mate-setting-number]");
+      if (numberInput) {
+        setCodexMateNumberSetting(numberInput.getAttribute("data-codex-mate-setting-number"), numberInput.value);
+        return;
+      }
       if (!closestElement(event.target, "[data-codex-mate-provider-field]")) return;
       codexMateProviderProfileDirty = true;
     }, true);
     overlay.addEventListener("change", (event) => {
+      const numberInput = closestElement(event.target, "[data-codex-mate-setting-number]");
+      if (numberInput) {
+        setCodexMateNumberSetting(numberInput.getAttribute("data-codex-mate-setting-number"), numberInput.value);
+        return;
+      }
       if (!closestElement(event.target, "[data-codex-mate-provider-field]")) return;
       codexMateProviderProfileDirty = true;
     }, true);
@@ -1891,6 +1896,44 @@
     pluginButton.addEventListener("click", () => {
       spoofChatGPTAuthMethod(pluginButton);
     }, true);
+  }
+
+  function chromePluginGateNames() {
+    return new Set(["410065390", "browser_use_external"]);
+  }
+
+  function statsigClients() {
+    const root = window.__STATSIG__ || globalThis.__STATSIG__;
+    if (!root || typeof root !== "object") return [];
+    const clients = [root.firstInstance, typeof root.instance === "function" ? root.instance() : null];
+    if (root.instances && typeof root.instances === "object") clients.push(...Object.values(root.instances));
+    return clients.filter((client, index, array) => client && typeof client === "object" && array.indexOf(client) === index);
+  }
+
+  function installChromePluginGateOverride() {
+    if (!codexMateSettings().pluginEntryUnlock) return;
+    const gates = chromePluginGateNames();
+    statsigClients().forEach((client) => {
+      if (client.__codexMateChromeGateVersion === codexMateChromeGateVersion) return;
+      const originalCheckGate = typeof client.checkGate === "function" ? client.checkGate.bind(client) : null;
+      const originalGetFeatureGate = typeof client.getFeatureGate === "function" ? client.getFeatureGate.bind(client) : null;
+      const forceGate = (name) => gates.has(String(name || "").trim());
+      if (originalCheckGate) {
+        client.checkGate = (name, ...args) => forceGate(name) || originalCheckGate(name, ...args);
+      }
+      if (originalGetFeatureGate) {
+        client.getFeatureGate = (name, ...args) => {
+          const gate = originalGetFeatureGate(name, ...args);
+          if (!forceGate(name)) return gate;
+          if (!gate || typeof gate !== "object") {
+            return { name, value: true, ruleID: "codex-mate-force-enabled" };
+          }
+          return { ...gate, value: true, ruleID: gate.ruleID || "codex-mate-force-enabled" };
+        };
+      }
+      client.__codexMateChromeGateVersion = codexMateChromeGateVersion;
+    });
+    window.__codexMateChromeGateOverride = { installedAt: Date.now(), version: codexMateChromeGateVersion };
   }
 
   function pluginInstallCandidates() {
@@ -2209,6 +2252,81 @@
       }
     });
     if (changed) writeProjectMoveProjection(projection);
+  }
+
+  function deletedSessionTombstoneSessionKey(sessionId) {
+    const key = projectMoveSessionKey(sessionId);
+    if (!key || key === "__proto__" || key === "prototype" || key === "constructor") return "";
+    return key;
+  }
+
+  function readDeletedSessionTombstones() {
+    try {
+      const parsed = JSON.parse(localStorage.getItem(deletedSessionTombstoneKey) || "{}");
+      const raw = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+      const now = Date.now();
+      const tombstones = {};
+      Object.entries(raw).forEach(([key, value]) => {
+        const sessionId = deletedSessionTombstoneSessionKey(key);
+        if (!sessionId) return;
+        const at = typeof value === "number" ? value : Number(value?.at || 0);
+        if (!Number.isFinite(at) || now - at > deletedSessionTombstoneTtlMs) return;
+        tombstones[sessionId] = { at };
+      });
+      if (Object.keys(tombstones).length !== Object.keys(raw).length) {
+        writeDeletedSessionTombstones(tombstones);
+      }
+      return tombstones;
+    } catch {
+      return {};
+    }
+  }
+
+  function writeDeletedSessionTombstones(tombstones) {
+    try {
+      localStorage.setItem(deletedSessionTombstoneKey, JSON.stringify(tombstones || {}));
+    } catch (error) {
+      window.__codexDeletedSessionTombstoneFailures = window.__codexDeletedSessionTombstoneFailures || [];
+      window.__codexDeletedSessionTombstoneFailures.push(String(error?.stack || error));
+    }
+  }
+
+  function saveDeletedSessionTombstone(ref) {
+    const sessionId = deletedSessionTombstoneSessionKey(ref?.session_id || "");
+    if (!sessionId) return;
+    const tombstones = readDeletedSessionTombstones();
+    tombstones[sessionId] = { at: Date.now() };
+    writeDeletedSessionTombstones(tombstones);
+  }
+
+  function clearDeletedSessionTombstone(ref) {
+    const tombstones = readDeletedSessionTombstones();
+    let changed = false;
+    threadIdVariants(ref?.session_id || "").map(deletedSessionTombstoneSessionKey).filter(Boolean).forEach((key) => {
+      if (Object.prototype.hasOwnProperty.call(tombstones, key)) {
+        delete tombstones[key];
+        changed = true;
+      }
+    });
+    if (changed) writeDeletedSessionTombstones(tombstones);
+  }
+
+  function isDeletedSessionRef(ref) {
+    if (!ref?.session_id) return false;
+    const tombstones = readDeletedSessionTombstones();
+    return threadIdVariants(ref.session_id).map(deletedSessionTombstoneSessionKey).filter(Boolean)
+      .some((key) => Object.prototype.hasOwnProperty.call(tombstones, key));
+  }
+
+  function removeDeletedRowsFromDom() {
+    const tombstones = readDeletedSessionTombstones();
+    if (Object.keys(tombstones).length === 0) return;
+    sessionRows(true).forEach((row) => {
+      const ref = sessionRefFromRow(row);
+      if (!isDeletedSessionRef(ref)) return;
+      row.remove();
+    });
+    cachedSessionRows = cachedSessionRows.filter((row) => row.isConnected);
   }
 
   function projectionForSessionId(sessionId, projection = readProjectMoveProjection()) {
@@ -2689,7 +2807,7 @@
     panel.querySelector("button")?.focus();
   }
 
-  function showToast(message, undoToken) {
+  function showToast(message, undoToken, onUndo) {
     document.querySelectorAll(".codex-delete-toast").forEach((node) => node.remove());
     const toast = document.createElement("div");
     toast.className = "codex-delete-toast";
@@ -2700,6 +2818,7 @@
       undo.addEventListener("click", async () => {
         const result = await postJson("/undo", { undo_token: undoToken });
         toast.textContent = result.message || "撤销完成";
+        if (result.status === "undone") onUndo?.(result);
         setTimeout(() => toast.remove(), 5000);
       });
       toast.appendChild(undo);
@@ -2784,10 +2903,18 @@
   function removeDeletedRow(row, button, ref) {
     releaseDeleteFocus(row, button);
     const shouldReload = isCurrentSessionRow(row, ref);
+    clearProjectMoveProjection(ref);
+    saveDeletedSessionTombstone(ref);
+    removeDeletedRowsFromDom();
     row.remove();
     if (shouldReload) {
       window.location.reload();
     }
+  }
+
+  function deleteResultShouldRemoveRow(result) {
+    if (result?.status === "server_deleted" || result?.status === "local_deleted") return true;
+    return !!result?.undo_token && String(result?.message || "").startsWith("本地数据库已删除");
   }
 
   function updateDeleteButtonOffsets() {
@@ -2812,9 +2939,12 @@
       if (!confirmed) return;
       releaseDeleteFocus(row, button);
       const result = await postJson("/delete", ref);
-      if (result.status === "server_deleted" || result.status === "local_deleted") {
+      if (deleteResultShouldRemoveRow(result)) {
         removeDeletedRow(row, button, ref);
-        showToast(result.message || "删除成功", result.undo_token);
+        showToast(result.message || "删除成功", result.undo_token, () => {
+          clearDeletedSessionTombstone(ref);
+          scan();
+        });
       } else {
         showToast(result.message || "删除失败", null);
       }
@@ -3280,6 +3410,8 @@
 
   function timelineQuestionSelector() {
     return [
+      '[data-local-conversation-user-anchor="true"]',
+      '[data-content-search-unit-key$=":user"]',
       '[data-message-author-role="user"]',
       '[data-testid="conversation-turn"][data-message-author-role="user"]',
       '[data-testid="conversation-turn"] [data-message-author-role="user"]',
@@ -3315,8 +3447,13 @@
     return [...explicitCandidates, ...codexUserBubbles];
   }
 
+  function timelineQuestionTargetNode(node) {
+    return node.closest?.('[data-local-conversation-user-anchor="true"], [data-content-search-unit-key$=":user"]') || node;
+  }
+
   function extractTimelineQuestionText(node) {
-    const clone = node.cloneNode(true);
+    const contentNode = node.querySelector(".whitespace-pre-wrap") || node;
+    const clone = contentNode.cloneNode(true);
     clone.querySelectorAll("button, svg, [aria-hidden='true'], .sr-only").forEach((child) => child.remove());
     return (clone.textContent || "").replace(/\s+/g, " ").trim();
   }
@@ -3344,7 +3481,7 @@
     return conversationTimelineQuestionCandidates(root).flatMap((node) => {
       if (node.closest("[data-app-action-sidebar-thread-id]")) return [];
       if (isExtensionUiNode(node)) return [];
-      const target = node.closest('[data-testid="conversation-turn"]') || node;
+      const target = timelineQuestionTargetNode(node);
       if (seen.has(target)) return [];
       seen.add(target);
       if (!visibleTimelineNode(target)) return [];
@@ -3361,6 +3498,29 @@
 
   function timelineScrollableHeight(scroller) {
     return Math.max(1, scroller.scrollHeight - scroller.clientHeight);
+  }
+
+  function timelineScrollerIsReversed(scroller) {
+    if (!scroller || scroller.nodeType !== 1) return false;
+    return getComputedStyle(scroller).flexDirection === "column-reverse";
+  }
+
+  function timelineTargetScrollTop(scroller, percent) {
+    const normalized = Math.max(0, Math.min(100, Number(percent ?? 50)));
+    const max = timelineScrollableHeight(scroller);
+    if (timelineScrollerIsReversed(scroller)) {
+      return -((100 - normalized) / 100) * max;
+    }
+    return (normalized / 100) * max;
+  }
+
+  function timelineCurrentScrollPercent(scroller) {
+    const max = timelineScrollableHeight(scroller);
+    const top = finiteScrollNumber(scroller?.scrollTop);
+    const percent = timelineScrollerIsReversed(scroller)
+      ? 100 - ((Math.abs(top) / max) * 100)
+      : (top / max) * 100;
+    return Math.max(0, Math.min(100, percent));
   }
 
   function timelineRawMarkerTop(question, scroller) {
@@ -3385,6 +3545,16 @@
 
   function removeConversationTimeline() {
     document.querySelectorAll(`.${timelineClass}`).forEach((node) => node.remove());
+    document.querySelectorAll(`.${timelineTooltipClass}`).forEach((node) => node.remove());
+  }
+
+  function removeStaleConversationTimeline() {
+    const staleRoots = Array.from(document.querySelectorAll(`.${timelineClass}`)).filter((node) => {
+      return node.dataset.codexConversationTimelineVersion !== codexConversationTimelineVersion;
+    });
+    if (staleRoots.length === 0) return;
+    staleRoots.forEach((node) => node.remove());
+    document.querySelectorAll(`.${timelineTooltipClass}`).forEach((node) => node.remove());
   }
 
   function clearConversationTimelineCache() {
@@ -3394,12 +3564,20 @@
     window.__codexConversationTimelineRefreshTimer = null;
   }
 
+  function isTimelineScrollable(node) {
+    if (!node || node.nodeType !== 1) return false;
+    const style = getComputedStyle(node);
+    return /(auto|scroll|overlay)/.test(style.overflowY) && node.scrollHeight > node.clientHeight + 1;
+  }
+
   function nearestTimelineScroller(node) {
-    for (let current = node?.parentElement; current; current = current.parentElement) {
+    for (let current = node?.nodeType === 1 ? node : node?.parentElement; current; current = current.parentElement) {
       const style = getComputedStyle(current);
-      if (/(auto|scroll)/.test(style.overflowY) && current.scrollHeight > current.clientHeight) return current;
+      if (/(auto|scroll|overlay)/.test(style.overflowY) && current.scrollHeight > current.clientHeight + 1) return current;
     }
-    return document.querySelector(".thread-scroll-container") || document.scrollingElement || document.documentElement;
+    const explicit = document.querySelector(".thread-scroll-container");
+    if (isTimelineScrollable(explicit)) return explicit;
+    return document.scrollingElement || document.documentElement;
   }
 
   function markTimelineProgrammaticScroll() {
@@ -3412,8 +3590,9 @@
     const scroller = nearestTimelineScroller(node);
     const nodeRect = node.getBoundingClientRect();
     const nextTop = scroller.scrollTop + nodeRect.top - timelineScrollerViewportTop(scroller) - (scroller.clientHeight / 2) + (nodeRect.height / 2);
+    const targetTop = threadScrollTargetTop(scroller, nextTop);
     markTimelineProgrammaticScroll();
-    scroller.scrollTo({ top: nextTop, behavior: "smooth" });
+    scroller.scrollTo({ top: targetTop, behavior: "smooth" });
   }
 
   function highlightTimelineTarget(node) {
@@ -3426,24 +3605,60 @@
     }, 1300);
   }
 
+  function positionTimelineTooltip(marker, tooltip) {
+    if (!marker || !tooltip) return;
+    const markerRect = marker.getBoundingClientRect();
+    const tooltipRect = tooltip.getBoundingClientRect();
+    const gap = 12;
+    const left = Math.max(8, markerRect.left - gap);
+    const minTop = 12 + (tooltipRect.height / 2);
+    const maxTop = window.innerHeight - 12 - (tooltipRect.height / 2);
+    const targetTop = markerRect.top + (markerRect.height / 2);
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${Math.max(minTop, Math.min(maxTop, targetTop))}px`;
+  }
+
   function createConversationTimelineMarker(question) {
     const marker = document.createElement("button");
     marker.type = "button";
     marker.className = timelineMarkerClass;
     marker.style.top = `${question.markerTop}%`;
     marker.dataset.timelineItemId = String(question.id || question.nodeId || "");
-    marker.setAttribute("aria-label", `跳转到：${truncateTimelineQuestion(question.preview || question.text)}`);
+    const previewText = truncateTimelineQuestion(question.preview || question.text);
+    marker.setAttribute("aria-label", `跳转到：${previewText}`);
     const tooltip = document.createElement("span");
     tooltip.className = timelineTooltipClass;
     tooltip.id = `codex-conversation-timeline-tooltip-${question.id || question.nodeId}`;
     tooltip.setAttribute("role", "tooltip");
-    tooltip.textContent = truncateTimelineQuestion(question.preview || question.text);
+    tooltip.textContent = previewText;
     marker.setAttribute("aria-describedby", tooltip.id);
-    marker.appendChild(tooltip);
+    document.body.appendChild(tooltip);
+    const showMarkerTooltip = () => {
+      marker.dataset.previewOpen = "true";
+      tooltip.dataset.previewOpen = "true";
+      positionTimelineTooltip(marker, tooltip);
+      requestAnimationFrame(() => positionTimelineTooltip(marker, tooltip));
+    };
+    const hideMarkerTooltip = () => {
+      delete marker.dataset.previewOpen;
+      delete tooltip.dataset.previewOpen;
+    };
+    marker.addEventListener("pointerenter", showMarkerTooltip, true);
+    marker.addEventListener("pointermove", () => positionTimelineTooltip(marker, tooltip), true);
+    marker.addEventListener("pointerleave", hideMarkerTooltip, true);
+    marker.addEventListener("mouseenter", showMarkerTooltip, true);
+    marker.addEventListener("mousemove", () => positionTimelineTooltip(marker, tooltip), true);
+    marker.addEventListener("mouseleave", hideMarkerTooltip, true);
+    marker.addEventListener("focus", showMarkerTooltip, true);
+    marker.addEventListener("blur", hideMarkerTooltip, true);
+    let lastActivatedAt = 0;
     const activateMarker = (event) => {
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation?.();
+      const now = Date.now();
+      if (event.type === "click" && now - lastActivatedAt < 250) return;
+      lastActivatedAt = now;
       document.querySelectorAll(`.${timelineMarkerClass}.codex-conversation-timeline-marker-active`).forEach((node) => {
         node.classList.remove("codex-conversation-timeline-marker-active");
       });
@@ -3456,6 +3671,7 @@
       }
     };
     marker.addEventListener("pointerup", activateMarker, true);
+    marker.addEventListener("click", activateMarker, true);
     marker.addEventListener("keydown", (event) => {
       if (event.key === "Enter" || event.key === " ") activateMarker(event);
     }, true);
@@ -3480,6 +3696,60 @@
       .replace(/\s+/g, " ")
       .trim()
       .toLowerCase();
+  }
+
+  function timelineItemIndex(item) {
+    const index = Number(item?.index);
+    return Number.isInteger(index) && index >= 0 ? index : -1;
+  }
+
+  function candidateDistanceToViewportCenter(candidate) {
+    const rect = candidate?.node?.getBoundingClientRect?.();
+    if (!rect) return Number.POSITIVE_INFINITY;
+    return Math.abs((rect.top + (rect.height / 2)) - (window.innerHeight / 2));
+  }
+
+  function selectTimelineTargetCandidate(candidates, item, options = {}) {
+    if (!Array.isArray(candidates) || candidates.length === 0) return null;
+    const allowAmbiguous = options.allowAmbiguous !== false;
+    const targetIndex = timelineItemIndex(item);
+    if (targetIndex >= 0) {
+      const indexed = candidates.find((question) => question.visibleIndex === targetIndex);
+      if (indexed) return indexed;
+    }
+    if (!allowAmbiguous) return null;
+    if (candidates.length === 1) return candidates[0];
+    return [...candidates].sort((left, right) => {
+      return candidateDistanceToViewportCenter(left) - candidateDistanceToViewportCenter(right);
+    })[0] || null;
+  }
+
+  function timelineCalibrationAnchor(item) {
+    const items = backendTimelineItemsForCurrentSession();
+    if (items.length === 0) return null;
+    const targetIndex = timelineItemIndex(item);
+    const anchors = conversationTimelineQuestions().flatMap((question) => {
+      const normalized = normalizeTimelineText(question.text);
+      const matched = uniqueBackendTimelineMatch(normalized, items);
+      if (!matched) return [];
+      if (targetIndex >= 0 && timelineItemIndex(matched) === targetIndex) return [];
+      return [{ question, item: matched }];
+    });
+    if (anchors.length === 0) return null;
+    return anchors.sort((left, right) => {
+      return candidateDistanceToViewportCenter(left.question) - candidateDistanceToViewportCenter(right.question);
+    })[0] || null;
+  }
+
+  function calibratedTimelineTargetPercent(item, scroller) {
+    const anchor = timelineCalibrationAnchor(item);
+    if (!anchor) return null;
+    const currentPercent = timelineCurrentScrollPercent(scroller);
+    const anchorPercent = timelineItemReferencePercent(anchor.item);
+    const targetPercent = timelineItemReferencePercent(item);
+    const calibrated = targetPercent + (currentPercent - anchorPercent);
+    if (!Number.isFinite(calibrated)) return null;
+    return Math.max(0, Math.min(100, calibrated));
   }
 
   function conversationTimelineCache() {
@@ -3508,6 +3778,55 @@
     return Array.isArray(payload?.items) ? payload.items.filter((item) => item && typeof item === "object") : [];
   }
 
+  function backendTimelineItemsForCurrentSession() {
+    const root = document.querySelector(`.${timelineClass}`);
+    const key = root?.dataset?.sessionId || conversationTimelineSessionKey(currentSessionRef());
+    if (!key) return [];
+    return backendTimelineItems(conversationTimelineCache()[key]?.payload);
+  }
+
+  function timelineItemReferencePercent(item) {
+    const scrollPercent = Number(item?.scroll_percent);
+    if (Number.isFinite(scrollPercent)) return scrollPercent;
+    const percent = Number(item?.percent);
+    return Number.isFinite(percent) ? percent : 50;
+  }
+
+  function timelineBackendItemText(item) {
+    return normalizeTimelineText(item?.text || item?.preview || "");
+  }
+
+  function uniqueBackendTimelineMatch(normalizedText, items) {
+    if (!normalizedText || !Array.isArray(items) || items.length === 0) return null;
+    const exact = items.filter((item) => timelineBackendItemText(item) === normalizedText);
+    if (exact.length === 1) return exact[0];
+    if (normalizedText.length < 16) return null;
+    const desiredPrefix = normalizedText.slice(0, 96);
+    const prefix = items.filter((item) => {
+      const candidate = timelineBackendItemText(item);
+      if (!candidate) return false;
+      const candidatePrefix = candidate.slice(0, 96);
+      return candidatePrefix.startsWith(desiredPrefix) || desiredPrefix.startsWith(candidatePrefix);
+    });
+    return prefix.length === 1 ? prefix[0] : null;
+  }
+
+  function limitedConversationTimelineItems(items, maxItems = conversationTimelineMaxItems()) {
+    const safeMax = sanitizeConversationTimelineMaxItems(maxItems);
+    if (!Array.isArray(items) || items.length <= safeMax) return Array.isArray(items) ? items : [];
+    if (safeMax <= 1) return [items[0]];
+    const selected = [];
+    const selectedIndexes = new Set();
+    for (let slot = 0; slot < safeMax; slot += 1) {
+      const index = Math.round((slot * (items.length - 1)) / (safeMax - 1));
+      if (!selectedIndexes.has(index)) {
+        selectedIndexes.add(index);
+        selected.push(items[index]);
+      }
+    }
+    return selected;
+  }
+
   function timelineTopFromPercent(percent) {
     const numeric = Number(percent);
     const value = Number.isFinite(numeric) ? numeric : 50;
@@ -3532,18 +3851,27 @@
     document.querySelectorAll(`.${timelineMarkerClass}.codex-conversation-timeline-marker-active`).forEach((node) => {
       node.classList.remove("codex-conversation-timeline-marker-active");
     });
-    document.querySelectorAll(`.${timelineItemClass}.codex-conversation-timeline-item-active`).forEach((node) => {
-      node.classList.remove("codex-conversation-timeline-item-active");
-    });
     if (!itemId) return;
     const escapedItemId = window.CSS?.escape ? CSS.escape(String(itemId)) : String(itemId).replace(/["\\]/g, "\\$&");
     document.querySelectorAll(`[data-timeline-item-id="${escapedItemId}"]`).forEach((node) => {
       if (node.classList.contains(timelineMarkerClass)) node.classList.add("codex-conversation-timeline-marker-active");
-      if (node.classList.contains(timelineItemClass)) node.classList.add("codex-conversation-timeline-item-active");
     });
   }
 
-  function findMountedTimelineTarget(item) {
+  function findMountedTimelineTargetByTurnId(item) {
+    const turnId = String(item?.turn_id || "").trim();
+    if (!turnId) return null;
+    const escapedTurnId = window.CSS?.escape ? CSS.escape(turnId) : turnId.replace(/["\\]/g, "\\$&");
+    const turn = document.querySelector(`[data-turn-key="${escapedTurnId}"]`);
+    if (!turn || isExtensionUiNode(turn)) return null;
+    const anchor = turn.querySelector('[data-local-conversation-user-anchor="true"], [data-content-search-unit-key$=":user"]');
+    const target = anchor || turn;
+    return visibleTimelineNode(target) ? target : null;
+  }
+
+  function findMountedTimelineTarget(item, options = {}) {
+    const turnTarget = findMountedTimelineTargetByTurnId(item);
+    if (turnTarget) return turnTarget;
     const desired = normalizeTimelineText(item?.text || item?.preview || "");
     if (!desired || desired === "空消息" || desired === "image attachment") return null;
     const candidates = conversationTimelineQuestions().map((question, visibleIndex) => ({
@@ -3552,21 +3880,23 @@
       normalized: normalizeTimelineText(question.text),
     })).filter((question) => question.normalized);
     const exact = candidates.filter((question) => question.normalized === desired);
-    if (exact.length > 0) return exact[0].node;
+    const exactMatch = selectTimelineTargetCandidate(exact, item, options);
+    if (exactMatch) return exactMatch.node;
     const desiredPrefix = desired.slice(0, 80);
-    const prefix = candidates.find((question) => {
+    const prefixCandidates = candidates.filter((question) => {
       const candidatePrefix = question.normalized.slice(0, 80);
       return desiredPrefix.length >= 8 && (candidatePrefix.startsWith(desiredPrefix) || desiredPrefix.startsWith(candidatePrefix));
     });
+    const prefix = selectTimelineTargetCandidate(prefixCandidates, item, options);
     if (prefix) return prefix.node;
     return null;
   }
 
-  function approximateScrollTimelineTarget(item) {
+  function approximateScrollTimelineTarget(item, options = {}) {
     const scroller = currentThreadScroller();
     if (!scroller) return false;
-    const percent = Math.max(0, Math.min(100, Number(item?.percent ?? 50)));
-    const targetTop = (percent / 100) * timelineScrollableHeight(scroller);
+    const calibratedPercent = options.calibrated ? calibratedTimelineTargetPercent(item, scroller) : null;
+    const targetTop = timelineTargetScrollTop(scroller, calibratedPercent ?? timelineItemReferencePercent(item));
     markTimelineProgrammaticScroll();
     if (typeof scroller.scrollTo === "function") {
       scroller.scrollTo({ top: targetTop, behavior: "smooth" });
@@ -3577,12 +3907,13 @@
   }
 
   function retryResolveTimelineTarget(item, attempt = 0) {
-    const target = findMountedTimelineTarget(item);
+    const target = findMountedTimelineTarget(item, { allowAmbiguous: true });
     if (target) {
       scrollTimelineTarget(target);
       highlightTimelineTarget(target);
       return true;
     }
+    if (attempt < 4) approximateScrollTimelineTarget(item, { calibrated: true });
     const delays = [180, 360, 700, 1100, 1600];
     if (attempt >= delays.length) {
       showToast("已滚动到附近，页面继续加载后可再次点击", null);
@@ -3594,7 +3925,7 @@
 
   function activateConversationTimelineItem(item) {
     setActiveConversationTimelineItem(item?.id);
-    const target = findMountedTimelineTarget(item);
+    const target = findMountedTimelineTarget(item, { allowAmbiguous: false });
     if (target) {
       scrollTimelineTarget(target);
       highlightTimelineTarget(target);
@@ -3607,73 +3938,47 @@
     retryResolveTimelineTarget(item);
   }
 
-  function createConversationTimelineItem(item) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = timelineItemClass;
-    button.dataset.timelineItemId = String(item.id || "");
-    button.innerHTML = `
-      <span class="codex-conversation-timeline-number">${String((Number(item.index) || 0) + 1).padStart(2, "0")}</span>
-      <span class="codex-conversation-timeline-preview">${escapeHtml(item.preview || item.text || "空消息")}</span>
-      ${item.timestamp ? `<span class="codex-conversation-timeline-time">${escapeHtml(item.timestamp)}</span>` : ""}
-    `;
-    button.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      activateConversationTimelineItem(item);
-    }, true);
-    return button;
-  }
-
   function renderConversationTimelinePayload(payload, ref) {
-    removeConversationTimeline();
     if (!codexMateSettings().conversationTimeline) return;
     const key = conversationTimelineSessionKey(ref);
     if (!key) return;
     const items = backendTimelineItems(payload);
+    const maxItems = conversationTimelineMaxItems();
+    const visibleItems = limitedConversationTimelineItems(items, maxItems);
+    if (payload?.status !== "ready" || visibleItems.length === 0) {
+      removeConversationTimeline();
+      return;
+    }
+    const signature = JSON.stringify({
+      key,
+      status: payload?.status || "",
+      maxItems,
+      ids: visibleItems.map((item) => `${item?.id || item?.index || ""}:${item?.preview || ""}:${item?.timestamp || ""}`),
+    });
+    const existingRoot = document.querySelector(`.${timelineClass}`);
+    if (
+      existingRoot?.dataset.renderSignature === signature
+      && existingRoot?.dataset.codexConversationTimelineVersion === codexConversationTimelineVersion
+    ) return;
+    removeConversationTimeline();
     const root = document.createElement("div");
     root.className = timelineClass;
     root.dataset.codexConversationTimelineVersion = codexConversationTimelineVersion;
     root.dataset.sessionId = key;
+    root.dataset.renderSignature = signature;
     const track = document.createElement("div");
     track.className = timelineTrackClass;
     root.appendChild(track);
 
-    if (payload?.status === "ready" && items.length > 0) {
-      const tops = timelineMarkerTopsFromItems(items);
-      items.forEach((item, index) => {
-        const marker = createConversationTimelineMarker({
-          ...item,
-          markerTop: Number(tops[index].toFixed(3)),
-          preview: item.preview || item.text || "空消息",
-        });
-        root.appendChild(marker);
+    const tops = timelineMarkerTopsFromItems(visibleItems);
+    visibleItems.forEach((item, index) => {
+      const marker = createConversationTimelineMarker({
+        ...item,
+        markerTop: Number(tops[index].toFixed(3)),
+        preview: item.preview || item.text || "空消息",
       });
-    }
-
-    const panel = document.createElement("div");
-    panel.className = timelinePanelClass;
-    const title = payload?.status === "ready" ? "完整对话目录" : "完整对话目录";
-    const subtitle = payload?.status === "ready"
-      ? `${items.length} 条用户提问`
-      : (payload?.message || "正在读取本地 rollout…");
-    panel.innerHTML = `
-      <div class="codex-conversation-timeline-header">
-        <div class="codex-conversation-timeline-title">${escapeHtml(title)}</div>
-        <div class="codex-conversation-timeline-subtitle">${escapeHtml(subtitle)}</div>
-      </div>
-      <div class="${timelineListClass}"></div>
-    `;
-    const list = panel.querySelector(`.${timelineListClass}`);
-    if (payload?.status === "ready" && items.length > 0) {
-      items.forEach((item) => list.appendChild(createConversationTimelineItem(item)));
-    } else {
-      const empty = document.createElement("div");
-      empty.className = "codex-conversation-timeline-empty";
-      empty.textContent = payload?.message || "正在读取完整对话目录…";
-      list.appendChild(empty);
-    }
-    root.appendChild(panel);
+      root.appendChild(marker);
+    });
     document.body.appendChild(root);
   }
 
@@ -3708,16 +4013,16 @@
     if (inflight[key]) return;
     inflight[key] = true;
     try {
-      const result = await withTimeout(postJson("/conversation-timeline", ref), 7000, "完整对话目录读取超时");
+      const result = await withTimeout(postJson("/conversation-timeline", ref), 7000, "对话节点读取超时");
       const payload = result && typeof result === "object"
         ? result
-        : { status: "failed", message: "完整对话目录读取失败", items: [] };
+        : { status: "failed", message: "对话节点读取失败", items: [] };
       cache[key] = { fetchedAt: Date.now(), payload };
       if (conversationTimelineSessionKey(currentSessionRef()) === key) {
         renderConversationTimelinePayload(payload, ref);
       }
     } catch (error) {
-      const payload = { status: "failed", message: bridgeErrorMessage(error, "完整对话目录读取失败"), items: [] };
+      const payload = { status: "failed", message: bridgeErrorMessage(error, "对话节点读取失败"), items: [] };
       cache[key] = { fetchedAt: Date.now(), payload };
       if (conversationTimelineSessionKey(currentSessionRef()) === key) {
         renderConversationTimelinePayload(payload, ref);
@@ -3770,11 +4075,12 @@
 
   function currentThreadScroller() {
     const explicit = document.querySelector(".thread-scroll-container");
-    if (explicit?.isConnected) return explicit;
+    if (explicit?.isConnected && isTimelineScrollable(explicit)) return explicit;
+    const explicitScroller = nearestTimelineScroller(explicit);
+    if (explicitScroller && explicitScroller !== document.scrollingElement && explicitScroller !== document.documentElement) return explicitScroller;
     const root = conversationTimelineRoot();
     if (!root?.isConnected) return document.scrollingElement || document.documentElement;
-    const style = getComputedStyle(root);
-    if (/(auto|scroll)/.test(style.overflowY) && root.scrollHeight > root.clientHeight) return root;
+    if (isTimelineScrollable(root)) return root;
     return nearestTimelineScroller(root);
   }
 
@@ -3806,7 +4112,9 @@
 
   function threadScrollTargetTop(scroller, targetTop) {
     const max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
-    return Math.max(0, Math.min(max, finiteScrollNumber(targetTop)));
+    const target = finiteScrollNumber(targetTop);
+    if (timelineScrollerIsReversed(scroller)) return Math.max(-max, Math.min(0, target));
+    return Math.max(0, Math.min(max, target));
   }
 
   function bindThreadScrollListener(scroller) {
@@ -3997,7 +4305,9 @@
   }
 
   function scanLightweight() {
+    removeStaleConversationTimeline();
     installStyle();
+    installChromePluginGateOverride();
     installCodexMateMenu();
     installDeleteButtonEventDelegation();
     installThreadScrollNavigationCapture();
@@ -4008,8 +4318,10 @@
   function scanDeferred() {
     enablePluginEntry();
     unblockPluginInstallButtons();
+    removeDeletedRowsFromDom();
     sessionRows().forEach(tryAttachButton);
     applyProjectMoveProjection();
+    removeDeletedRowsFromDom();
     scheduleProjectMoveProjection();
     scheduleChatsSortCorrection(0);
     syncActionGroupsLayout();
@@ -4035,10 +4347,10 @@
   }
 
   function isExtensionUiNode(node) {
-    return !!node?.closest?.(`.codex-delete-toast, .codex-delete-confirm-overlay, .codex-mate-modal-overlay, .${projectMoveOverlayClass}, .${actionTooltipClass}, .${timelineClass}, #codex-mate-menu`);
+    return !!node?.closest?.(`.codex-delete-toast, .codex-delete-confirm-overlay, .codex-mate-modal-overlay, .${projectMoveOverlayClass}, .${actionTooltipClass}, .${timelineClass}, .${timelineTooltipClass}, #codex-mate-menu`);
   }
 
-  const scanRelevantSelector = '[data-app-action-sidebar-thread-id], [data-app-action-sidebar-project-row], [data-app-action-sidebar-project-list-id], [data-codex-project-move-injected-list], [data-codex-archive-page-row="true"], [data-codex-archive-delete-all], .app-header-tint, button[aria-label="已归档对话"], button[aria-label="Archived conversations"], button:disabled.w-full.justify-center, [role="button"][aria-disabled="true"].cursor-not-allowed, [data-message-author-role="user"], [data-testid="conversation-turn"]';
+  const scanRelevantSelector = '[data-app-action-sidebar-thread-id], [data-app-action-sidebar-project-row], [data-app-action-sidebar-project-list-id], [data-codex-project-move-injected-list], [data-codex-archive-page-row="true"], [data-codex-archive-delete-all], .app-header-tint, button[aria-label="已归档对话"], button[aria-label="Archived conversations"], button:disabled.w-full.justify-center, [role="button"][aria-disabled="true"].cursor-not-allowed, [data-local-conversation-user-anchor="true"], [data-content-search-unit-key$=":user"], [data-message-author-role="user"], [data-testid="conversation-turn"]';
 
   function isScanRelevantNode(node) {
     if (node.nodeType !== 1) return false;
@@ -4048,7 +4360,7 @@
 
   function isChatContentMutation(mutation) {
     const target = mutation.target;
-    if (target?.closest?.('[data-message-author-role], [data-testid="conversation-turn"], main .prose')) {
+    if (target?.closest?.('[data-local-conversation-user-anchor], [data-content-search-unit-key], [data-message-author-role], [data-testid="conversation-turn"], main .prose')) {
       const changedNodes = [...Array.from(mutation.addedNodes), ...Array.from(mutation.removedNodes)];
       if (changedNodes.some(nodeLooksLikeTimelineQuestion)) return false;
       return !Array.from(mutation.addedNodes).some(isScanRelevantNode) && !Array.from(mutation.removedNodes).some(isScanRelevantNode);

@@ -17,6 +17,7 @@ class RolloutMessage:
     timestamp: str | None
     body: str
     message_index: int
+    turn_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -67,13 +68,18 @@ def read_thread_rollout(db_path: Path | None, session: SessionRef) -> RolloutRea
 def load_rollout_messages(path: Path) -> list[RolloutMessage]:
     messages: list[RolloutMessage] = []
     message_index = -1
+    current_turn_id = ""
     for raw in path.read_text(encoding="utf-8").splitlines():
         if not raw.strip():
             continue
         event = json.loads(raw)
+        payload = event.get("payload")
+        if isinstance(payload, dict):
+            turn_id = str(payload.get("turn_id") or "").strip()
+            if turn_id:
+                current_turn_id = turn_id
         if event.get("type") != "response_item":
             continue
-        payload = event.get("payload")
         if not isinstance(payload, dict) or payload.get("type") != "message":
             continue
         message_index += 1
@@ -87,7 +93,7 @@ def load_rollout_messages(path: Path) -> list[RolloutMessage]:
         content = payload.get("content")
         body = serialize_message_content(content)
         if body or has_known_message_content(content):
-            messages.append(RolloutMessage(role, speaker, format_timestamp(event.get("timestamp")), body, message_index))
+            messages.append(RolloutMessage(role, speaker, format_timestamp(event.get("timestamp")), body, message_index, current_turn_id))
     return messages
 
 
