@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import tomllib
 from pathlib import Path
 from typing import Any
 
@@ -107,9 +108,13 @@ def provider_from_settings_config(
 ) -> dict[str, object] | None:
     config_contents = string_value(settings_config.get("config"))
     auth_contents = auth_contents_from_settings(settings_config.get("auth"))
+    parsed_config = parse_toml_object(config_contents)
+    provider_name = first_non_empty(toml_string_at(parsed_config, "model_provider"), sanitize_provider_id(source_id)) or "codex-mate"
+    provider_config = toml_model_provider_config(parsed_config, provider_name)
     base_url = first_non_empty(
         string_at(settings_config, "base_url", "baseURL"),
         string_at(settings_config.get("config"), "base_url", "baseURL"),
+        string_at(provider_config, "base_url", "baseURL"),
         extract_toml_string(config_contents, "base_url"),
     )
     api_key = first_non_empty(
@@ -117,13 +122,19 @@ def provider_from_settings_config(
         json_pointer_string(settings_config, "auth", "OPENAI_API_KEY"),
         string_at(settings_config, "api_key", "apiKey"),
         string_at(settings_config.get("config"), "api_key", "apiKey"),
+        string_at(provider_config, "experimental_bearer_token", "api_key", "apiKey"),
         extract_toml_string(config_contents, "experimental_bearer_token"),
         extract_toml_string(config_contents, "api_key"),
         extract_json_string(auth_contents, "OPENAI_API_KEY"),
     )
-    wire_api = normalize_wire_api(first_non_empty(string_at(settings_config, "api_format", "apiFormat"), extract_toml_string(config_contents, "wire_api")))
-    provider_name = first_non_empty(extract_toml_string(config_contents, "model_provider"), sanitize_provider_id(source_id)) or "codex-mate"
-    model = first_non_empty(extract_toml_string(config_contents, "model"))
+    wire_api = normalize_wire_api(
+        first_non_empty(
+            string_at(settings_config, "api_format", "apiFormat"),
+            string_at(provider_config, "wire_api", "wireApi"),
+            extract_toml_string(config_contents, "wire_api"),
+        )
+    )
+    model = first_non_empty(toml_string_at(parsed_config, "model"), extract_toml_string(config_contents, "model"))
     config_present = bool(config_contents.strip())
     auth_present = bool(auth_contents.strip() and auth_contents.strip() != "{}")
     is_official = not config_present and not auth_present and not base_url and not api_key
@@ -270,6 +281,31 @@ def extract_toml_string(text: str, key: str) -> str:
         if match:
             return match.group(2).strip()
     return ""
+
+
+def parse_toml_object(text: str) -> dict[str, Any]:
+    if not text.strip():
+        return {}
+    try:
+        data = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def toml_string_at(value: object, key: str) -> str:
+    if not isinstance(value, dict):
+        return ""
+    item = value.get(key)
+    return item.strip() if isinstance(item, str) else ""
+
+
+def toml_model_provider_config(config: dict[str, Any], provider_name: str) -> dict[str, Any]:
+    providers = config.get("model_providers")
+    if not isinstance(providers, dict):
+        return {}
+    provider = providers.get(provider_name)
+    return provider if isinstance(provider, dict) else {}
 
 
 def sanitize_provider_id(value: str) -> str:

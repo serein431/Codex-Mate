@@ -32,6 +32,13 @@ Maintainer resources:
 
 <img src="docs/images/discussion-group-qr.png" alt="Codex Mate 交流群二维码" width="260">
 
+## 推荐中转站
+
+如果需要第三方 API 中转服务，可以参考 Corvus 中转站：
+
+- 支付购买链接：[https://corvusapi.org/](https://corvusapi.org/)
+- 官方后台链接：[https://jmrai.net/dashboard/overview](https://jmrai.net/dashboard/overview)
+
 ## 主要功能
 
 - 2.0 官方登录态保护面板：先保存第三方 API Key，再引导登录 ChatGPT

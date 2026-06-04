@@ -85,6 +85,35 @@ def test_list_codex_providers_parses_experimental_bearer_token_from_config(tmp_p
     assert sanitized["mode"] == "mixed-api"
 
 
+def test_list_codex_providers_reads_selected_model_provider_not_first_base_url(tmp_path):
+    db_path = tmp_path / ".cc-switch" / "cc-switch.db"
+    config = (
+        'model_provider = "cm"\n'
+        'model = "gpt-5.5"\n'
+        "\n"
+        "[model_providers.aiping]\n"
+        'name = "aiping"\n'
+        'base_url = "https://aiping.example/v1"\n'
+        'wire_api = "responses"\n'
+        "\n"
+        "[model_providers.cm]\n"
+        'name = "OpenAI"\n'
+        'base_url = "http://127.0.0.1:48760/v1"\n'
+        'wire_api = "chat"\n'
+        'experimental_bearer_token = "sk-cm"\n'
+    )
+    create_cc_switch_db(db_path, [("default", "codex", "default", json.dumps({"config": config, "auth": {"OPENAI_API_KEY": "sk-auth"}}), 1, 1, 1)])
+
+    provider = cc_switch.raw_codex_providers(db_path, login_ready=True)[0]
+    sanitized = cc_switch.sanitized_provider(provider)
+
+    assert provider["provider"] == "cm"
+    assert provider["base_url"] == "http://127.0.0.1:48760/v1"
+    assert provider["wire_api"] == "chat"
+    assert sanitized["base_url"] == "http://127.0.0.1:48760/v1"
+    assert sanitized["api_key_present"] is True
+
+
 def test_list_codex_providers_parses_direct_api_shape(tmp_path):
     db_path = tmp_path / ".cc-switch" / "cc-switch.db"
     create_cc_switch_db(

@@ -8,6 +8,9 @@ def test_readme_limits_discussion_group_qr_size():
     assert 'width="260"' in text
     assert '![Codex Mate 交流群二维码](docs/images/discussion-group-qr.jpg)' not in text
     assert text.index("## 交流群") < text.index("## 主要功能")
+    assert text.index("## 推荐中转站") < text.index("## 主要功能")
+    assert "[https://corvusapi.org/](https://corvusapi.org/)" in text
+    assert "[https://jmrai.net/dashboard/overview](https://jmrai.net/dashboard/overview)" in text
 
 
 def test_readme_includes_codex_mate_icon_and_toc():
