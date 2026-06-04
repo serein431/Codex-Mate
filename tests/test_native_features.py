@@ -604,9 +604,13 @@ def test_apply_cc_switch_provider_uses_mixed_api_when_chatgpt_login_exists(tmp_p
         "requires_openai_auth = true\n"
     )
     create_cc_switch_db(ccs_home / "cc-switch.db", [("p1", "codex", "Relay", json.dumps({"config": config, "auth": {"OPENAI_API_KEY": "sk-new"}}), 1, 1, 0)])
-    history_calls = []
-    monkeypatch.setattr(native_features.history_sync, "resolve_paths", lambda home: ("paths", home))
-    monkeypatch.setattr(native_features.history_sync, "sync_history_if_ready", lambda paths: history_calls.append(paths) or {"status": "skipped"})
+    monkeypatch.setattr(native_features.history_sync, "sync_history_if_ready", lambda paths: (_ for _ in ()).throw(AssertionError("history sync should not run during provider switch")))
+    visibility_calls = []
+    monkeypatch.setattr(
+        native_features.history_sync,
+        "sync_history_visibility_if_ready",
+        lambda paths: visibility_calls.append(paths) or {"ok": True, "skipped": False, "visibility_only": True},
+    )
 
     payload = native_features.apply_cc_switch_provider(
         codex_home,
@@ -623,7 +627,8 @@ def test_apply_cc_switch_provider_uses_mixed_api_when_chatgpt_login_exists(tmp_p
     assert config_data["model"] == "gpt-5.5"
     assert config_data["model_providers"]["custom"]["experimental_bearer_token"] == "sk-new"
     assert auth == {"auth_mode": "chatgpt", "tokens": {"refresh_token": "tok"}}
-    assert history_calls == [("paths", codex_home)]
+    assert payload["history_sync"]["visibility_only"] is True
+    assert visibility_calls == [native_features.history_sync.resolve_paths(codex_home)]
     assert json.loads((ccs_home / "settings.json").read_text(encoding="utf-8"))["currentProviderCodex"] == "p1"
 
 
@@ -637,8 +642,12 @@ def test_apply_cc_switch_provider_uses_pure_api_without_chatgpt_login(tmp_path, 
         ccs_home / "cc-switch.db",
         [("p1", "codex", "Relay", json.dumps({"base_url": "https://relay.example/v1", "api_key": "sk-new", "api_format": "chat"}), 1, 1, 0)],
     )
-    monkeypatch.setattr(native_features.history_sync, "resolve_paths", lambda home: ("paths", home))
-    monkeypatch.setattr(native_features.history_sync, "sync_history_if_ready", lambda paths: {"status": "skipped"})
+    monkeypatch.setattr(native_features.history_sync, "sync_history_if_ready", lambda paths: (_ for _ in ()).throw(AssertionError("history sync should not run during provider switch")))
+    monkeypatch.setattr(
+        native_features.history_sync,
+        "sync_history_visibility_if_ready",
+        lambda paths: {"ok": True, "skipped": False, "visibility_only": True},
+    )
 
     payload = native_features.apply_cc_switch_provider(
         codex_home,
@@ -654,6 +663,7 @@ def test_apply_cc_switch_provider_uses_pure_api_without_chatgpt_login(tmp_path, 
     assert config["model_provider"] == "p1"
     assert config["model_providers"]["p1"]["wire_api"] == "chat"
     assert auth == {"OPENAI_API_KEY": "sk-new"}
+    assert payload["history_sync"]["visibility_only"] is True
 
 
 def test_apply_cc_switch_provider_switches_official_provider(tmp_path, monkeypatch):
@@ -664,8 +674,12 @@ def test_apply_cc_switch_provider_switches_official_provider(tmp_path, monkeypat
     (codex_home / "auth.json").write_text('{"auth_mode":"chatgpt","OPENAI_API_KEY":"sk-old","tokens":{"access_token":"tok"}}\n', encoding="utf-8")
     (codex_home / "config.toml").write_text('model_provider = "custom"\n[model_providers.custom]\nbase_url = "https://old.example/v1"\n', encoding="utf-8")
     create_cc_switch_db(ccs_home / "cc-switch.db", [("official", "codex", "OpenAI Official", json.dumps({"config": "", "auth": {}}), 1, 1, 0)])
-    monkeypatch.setattr(native_features.history_sync, "resolve_paths", lambda home: ("paths", home))
-    monkeypatch.setattr(native_features.history_sync, "sync_history_if_ready", lambda paths: {"status": "skipped"})
+    monkeypatch.setattr(native_features.history_sync, "sync_history_if_ready", lambda paths: (_ for _ in ()).throw(AssertionError("history sync should not run during provider switch")))
+    monkeypatch.setattr(
+        native_features.history_sync,
+        "sync_history_visibility_if_ready",
+        lambda paths: {"ok": True, "skipped": False, "visibility_only": True},
+    )
 
     payload = native_features.apply_cc_switch_provider(
         codex_home,
@@ -678,6 +692,7 @@ def test_apply_cc_switch_provider_switches_official_provider(tmp_path, monkeypat
     assert payload["profile"]["mode"] == "official"
     assert 'model_provider = "custom"' not in (codex_home / "config.toml").read_text(encoding="utf-8")
     assert "OPENAI_API_KEY" not in native_features.read_json_object(codex_home / "auth.json")
+    assert payload["history_sync"]["visibility_only"] is True
 
 
 def test_apply_cc_switch_provider_does_not_update_external_current_on_failure(tmp_path, monkeypatch):

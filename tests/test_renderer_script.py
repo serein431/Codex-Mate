@@ -474,6 +474,10 @@ def test_renderer_script_adds_session_move_contract():
     assert "function updateProjectMoveEmptyStates" in text
     assert "function scheduleChatsSortCorrection" in text
     assert "function applyChatsSortCorrection" in text
+    assert "function scheduleSidebarTimeRepair" in text
+    assert "function applySidebarTimeRepair" in text
+    assert "function sidebarRelativeTimeLabel" in text
+    assert "codexMateSidebarTimeRepairMs" in text
     assert "async function moveSessionToProject" in text
     assert "async function moveSessionToProjectless" in text
     assert 'postJson("/move-thread-workspace"' in text

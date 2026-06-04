@@ -400,7 +400,7 @@ python -m codex_mate provider-mode pure-api \
 
 如果你已经使用 CC Switch 管理 Codex 供应商，CM 面板会在“供应商配置”上方显示“CC Switch 速切”。
 
-Codex Mate 会直接读取本机 `~/.cc-switch/cc-switch.db` 里的 `app_type = "codex"` 供应商，展示名称、当前启用状态、模式、Base URL、Wire API 和 API Key 是否存在。点击“切换”后，Codex Mate 会按当前模式写入 Codex 配置：保留官方登录态时只更新 `config.toml` 里的当前 provider；纯 API 兼容模式才会写入 `auth.json`。切换成功后会同步 CC Switch 的当前供应商状态，并顺手触发一次轻量历史同步。
+Codex Mate 会直接读取本机 `~/.cc-switch/cc-switch.db` 里的 `app_type = "codex"` 供应商，展示名称、当前启用状态、模式、Base URL、Wire API 和 API Key 是否存在。点击“切换”后，Codex Mate 会按当前模式写入 Codex 配置：保留官方登录态时只更新 `config.toml` 里的当前 provider；纯 API 兼容模式才会写入 `auth.json`。切换成功后会同步 CC Switch 的当前供应商状态，并执行一次轻量历史可见性同步：只对齐 provider/model 和 rollout 首行元数据，不做时间戳修复或侧边栏索引重写。完整历史修复仍可手动运行 `python -m codex_mate history-sync --json`。
 
 如果没有安装 CC Switch、数据库不存在，或还没有 Codex 供应商，面板会显示空状态，不会卡住 Codex。
 

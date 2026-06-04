@@ -1114,9 +1114,9 @@ def apply_cc_switch_provider(
         }
 
     try:
-        history_result = history_sync.sync_history_if_ready(history_sync.resolve_paths(codex_home))
+        history_result = history_sync.sync_history_visibility_if_ready(history_sync.resolve_paths(codex_home))
     except Exception as exc:
-        history_result = {"status": "failed", "message": str(exc)}
+        history_result = {"status": "failed", "message": str(exc), "visibility_only": True}
 
     status = "updated" if cc_switch_changed or result.get("status") == "updated" else str(result.get("status") or "skipped")
     return {

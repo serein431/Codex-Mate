@@ -605,6 +605,43 @@ def sync_history_to_current_profile(paths: HistoryPaths) -> dict[str, object]:
     }
 
 
+def sync_history_visibility_to_current_profile(paths: HistoryPaths) -> dict[str, object]:
+    missing = environment_missing_reason(paths)
+    if missing:
+        raise RuntimeError(missing)
+    profile = read_current_profile(paths)
+    db_backup = make_backup(paths, "provider-switch")
+    db_result = update_database_threads(paths, profile)
+    session_result = update_session_files(paths, profile)
+    return {
+        "ok": True,
+        "skipped": False,
+        "visibility_only": True,
+        "current_provider": profile.provider,
+        "current_model": profile.model,
+        "backup_path": str(db_backup),
+        **db_result,
+        **session_result,
+    }
+
+
+def sync_history_visibility_if_ready(paths: HistoryPaths) -> dict[str, object]:
+    missing = environment_missing_reason(paths)
+    if missing:
+        return {"ok": True, "skipped": True, "reason": missing}
+    current_status = status(paths)
+    mismatched_provider = int(current_status.get("mismatched_provider_threads") or 0)
+    mismatched_model = int(current_status.get("mismatched_model_threads") or 0)
+    if mismatched_provider == 0 and mismatched_model == 0:
+        return {
+            **current_status,
+            "skipped": True,
+            "visibility_only": True,
+            "reason": "history already matches current provider/model",
+        }
+    return sync_history_visibility_to_current_profile(paths)
+
+
 def sync_history_if_ready(paths: HistoryPaths) -> dict[str, object]:
     missing = environment_missing_reason(paths)
     if missing:

@@ -542,6 +542,39 @@ def test_sync_history_if_ready_syncs_when_profile_mismatches(tmp_path):
     assert Path(result["backup_path"]).exists()
 
 
+def test_sync_history_visibility_if_ready_skips_heavy_sidebar_rewrites(tmp_path):
+    home = tmp_path / ".codex"
+    write_config(home)
+    create_threads_db(home)
+    session_path = write_session_file(home, "old-thread", "old_provider", "gpt-old")
+    session_index = json.dumps({"id": "old-thread", "thread_name": "Old Thread", "updated_at": "1970-01-01T00:00:00Z"}) + "\n"
+    global_state = '{"project-order":["/keep"],"thread-workspace-root-hints":{"old-thread":"/keep"}}\n'
+    (home / "session_index.jsonl").write_text(session_index, encoding="utf-8")
+    (home / ".codex-global-state.json").write_text(global_state, encoding="utf-8")
+
+    result = history_sync.sync_history_visibility_if_ready(history_sync.resolve_paths(home))
+
+    assert result["ok"] is True
+    assert result["skipped"] is False
+    assert result["visibility_only"] is True
+    assert result["updated_database_rows"] == 2
+    assert result["updated_session_files"] == 1
+    assert "updated_database_timestamps" not in result
+    assert "rewritten_index_entries" not in result
+    assert "updated_global_state" not in result
+    assert Path(result["backup_path"]).exists()
+    assert Path(result["backup_path"] + ".session_index.jsonl").exists()
+    assert (home / "session_index.jsonl").read_text(encoding="utf-8") == session_index
+    assert (home / ".codex-global-state.json").read_text(encoding="utf-8") == global_state
+
+    with sqlite3.connect(home / "state_5.sqlite") as conn:
+        rows = conn.execute("SELECT model_provider, model, COUNT(*) FROM threads GROUP BY model_provider, model").fetchall()
+    assert rows == [("current_provider", "gpt-current", 3)]
+    payload = json.loads(session_path.read_text(encoding="utf-8").splitlines()[0])["payload"]
+    assert payload["model_provider"] == "current_provider"
+    assert payload["model"] == "gpt-current"
+
+
 def test_sync_history_repairs_desktop_global_state_sidebar_indexes(tmp_path):
     home = tmp_path / ".codex"
     write_config(home)

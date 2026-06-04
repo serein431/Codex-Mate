@@ -35,6 +35,8 @@
   const projectMoveRefreshDelaysMs = [80, 250, 700, 1500, 3000];
   const chatsSortRefreshIntervalMs = 5000;
   const chatsSortDbRefreshIntervalMs = 20000;
+  const sidebarTimeRepairRefreshIntervalMs = 60000;
+  const sidebarTimeRepairDbRefreshIntervalMs = 30000;
   const codexMateVersion = window.__CODEX_MATE_VERSION__ || "dev";
   const codexMateSettingsKey = "codexMateSettings";
   const codexMateMenuVersion = "27";
@@ -101,9 +103,14 @@
   window.__codexProjectMoveProjectionTimer = null;
   clearTimeout(window.__codexProjectMoveChatsSortTimer);
   window.__codexProjectMoveChatsSortTimer = null;
+  clearTimeout(window.__codexMateSidebarTimeRepairTimer);
+  window.__codexMateSidebarTimeRepairTimer = null;
   let chatsSortInFlight = false;
   let chatsSortSignature = "";
   let chatsSortLastFetchAt = 0;
+  let sidebarTimeRepairInFlight = false;
+  let sidebarTimeRepairSignature = "";
+  let sidebarTimeRepairLastFetchAt = 0;
   clearTimeout(window.__codexMateThreadScrollSaveTimer);
   window.__codexMateThreadScrollSaveTimer = null;
   (window.__codexMateThreadScrollRestoreTimers || []).forEach((timer) => clearTimeout(timer));
@@ -1651,7 +1658,7 @@
     codexMateCcSwitchStatus = { status: "saving", message: "正在切换 CC Switch 供应商…" };
     renderCcSwitchProviders();
     try {
-      const result = await withTimeout(postJson("/cc-switch/apply", { source_id: sourceId }), 12000, "CC Switch 切换超时");
+      const result = await withTimeout(postJson("/cc-switch/apply", { source_id: sourceId }), bridgeFallbackTimeoutMs("/cc-switch/apply"), "CC Switch 切换超时");
       if (result?.status === "failed") throw new Error(result?.message || "CC Switch 供应商切换失败");
       codexMateProviderProfileDirty = false;
       if (result?.profile) {
@@ -1664,6 +1671,7 @@
       codexMateProviderProfileStatus = { status: "ok", message: result?.message || "供应商已切换" };
       codexMateCcSwitchStatus = { status: "ok", message: result?.message || "CC Switch 供应商已切换" };
       showToast(result?.message || "CC Switch 供应商已切换", null);
+      scheduleSidebarTimeRepair(0);
       await Promise.allSettled([
         checkCodexMateCcSwitchProviders(),
         checkCodexMateProviderProfileStatus(),
@@ -2984,6 +2992,40 @@
     return numericTimestamp(payload?.updated_at_ms) || timestampValueToMs(payload?.updated_at) || numericTimestamp(payload?.created_at_ms);
   }
 
+  function sidebarRelativeTimeLabel(timestampMs, nowMs = Date.now()) {
+    const timestamp = numericTimestamp(timestampMs);
+    if (!timestamp) return "";
+    const diff = Math.max(0, nowMs - timestamp);
+    const minute = 60 * 1000;
+    const hour = 60 * minute;
+    const day = 24 * hour;
+    const month = 30 * day;
+    const year = 365 * day;
+    if (diff < minute) return "刚刚";
+    if (diff < hour) return `${Math.max(1, Math.floor(diff / minute))} 分`;
+    if (diff < day) return `${Math.floor(diff / hour)} 小时`;
+    if (diff < month) return `${Math.floor(diff / day)} 天`;
+    if (diff < year) return `${Math.floor(diff / month)} 月`;
+    return `${Math.floor(diff / year)} 年`;
+  }
+
+  function sidebarTimeNode(row) {
+    const nodes = Array.from(row?.querySelectorAll?.(".tabular-nums") || []);
+    return nodes.find((node) => /^(?:刚刚|\d+\s*(?:分|小时|天|月|年))$/.test(String(node.textContent || "").trim()))
+      || nodes.find((node) => String(node.textContent || "").trim())
+      || null;
+  }
+
+  function sortKeyMapFromResult(result) {
+    const byId = new Map();
+    if (result?.status !== "ok" || !Array.isArray(result?.sort_keys)) return byId;
+    result.sort_keys.forEach((item) => {
+      const key = projectMoveSessionKey(String(item?.session_id || ""));
+      if (key) byId.set(key, item);
+    });
+    return byId;
+  }
+
   function projectMoveSessionKey(sessionId) {
     const variants = threadIdVariants(sessionId);
     const bareId = variants.find((id) => !id.startsWith("local:"));
@@ -3526,13 +3568,7 @@
       if (shouldRefreshSortKeys) {
         const result = await postJson("/thread-sort-keys", { sessions: refs }).catch(() => ({ status: "failed", sort_keys: [] }));
         chatsSortLastFetchAt = Date.now();
-        const byId = new Map();
-        if (result?.status === "ok" && Array.isArray(result?.sort_keys)) {
-          result.sort_keys.forEach((item) => {
-            const key = projectMoveSessionKey(String(item?.session_id || ""));
-            if (key) byId.set(key, item);
-          });
-        }
+        const byId = sortKeyMapFromResult(result);
         rows.forEach((row) => {
           const ref = sessionRefFromRow(row);
           const payload = byId.get(projectMoveSessionKey(ref.session_id));
@@ -3545,6 +3581,41 @@
       chatsSortSignature = visibleChatsRows().map((row) => projectMoveSessionKey(sessionRefFromRow(row).session_id)).join("|");
     } finally {
       chatsSortInFlight = false;
+    }
+  }
+
+  async function applySidebarTimeRepair() {
+    if (sidebarTimeRepairInFlight) return;
+    const rows = sessionRows().filter((row) => row.isConnected && sidebarTimeNode(row));
+    if (!rows.length) return;
+    const refs = rows.map(sessionRefFromRow).filter((ref) => ref.session_id);
+    const signature = refs.map((ref) => projectMoveSessionKey(ref.session_id)).join("|");
+    const rowsHaveRepairMs = rows.every((row) => numericTimestamp(row.dataset.codexMateSidebarTimeRepairMs));
+    const shouldRefresh = signature !== sidebarTimeRepairSignature || !rowsHaveRepairMs || Date.now() - sidebarTimeRepairLastFetchAt > sidebarTimeRepairDbRefreshIntervalMs;
+    if (!shouldRefresh) return;
+    sidebarTimeRepairInFlight = true;
+    try {
+      const result = await postJson("/thread-sort-keys", { sessions: refs }).catch(() => ({ status: "failed", sort_keys: [] }));
+      sidebarTimeRepairLastFetchAt = Date.now();
+      const byId = sortKeyMapFromResult(result);
+      rows.forEach((row) => {
+        const ref = sessionRefFromRow(row);
+        const payload = byId.get(projectMoveSessionKey(ref.session_id));
+        const timestampMs = timestampMsFromPayload(payload);
+        const label = sidebarRelativeTimeLabel(timestampMs);
+        const node = sidebarTimeNode(row);
+        if (!timestampMs || !label || !node) return;
+        node.textContent = label;
+        try {
+          node.title = new Date(timestampMs).toLocaleString();
+        } catch (_) {
+          node.title = "";
+        }
+        row.dataset.codexMateSidebarTimeRepairMs = String(timestampMs);
+      });
+      sidebarTimeRepairSignature = signature;
+    } finally {
+      sidebarTimeRepairInFlight = false;
     }
   }
 
@@ -3567,11 +3638,28 @@
     }, delay);
   }
 
+  function scheduleSidebarTimeRepair(delay = sidebarTimeRepairRefreshIntervalMs) {
+    if (window.__codexMateSidebarTimeRepairTimer) {
+      if (delay !== 0) return;
+      clearTimeout(window.__codexMateSidebarTimeRepairTimer);
+      window.__codexMateSidebarTimeRepairTimer = null;
+    }
+    window.__codexMateSidebarTimeRepairTimer = setTimeout(() => {
+      if (window.__codexProjectMoveRuntimeId !== codexProjectMoveRuntimeId) return;
+      window.__codexMateSidebarTimeRepairTimer = null;
+      applySidebarTimeRepair().catch((error) => {
+        window.__codexMateSidebarTimeRepairFailures = window.__codexMateSidebarTimeRepairFailures || [];
+        window.__codexMateSidebarTimeRepairFailures.push(String(error?.stack || error));
+      }).finally(() => scheduleSidebarTimeRepair());
+    }, delay);
+  }
+
   function refreshAfterProjectMove() {
     const refreshVisibleSidebar = () => {
       if (window.__codexProjectMoveRuntimeId !== codexProjectMoveRuntimeId) return;
       applyProjectMoveProjection();
       scheduleChatsSortCorrection(0);
+      scheduleSidebarTimeRepair(0);
       syncActionGroupsLayout();
     };
     refreshVisibleSidebar();
@@ -5267,6 +5355,7 @@
     removeDeletedRowsFromDom();
     scheduleProjectMoveProjection();
     scheduleChatsSortCorrection(0);
+    scheduleSidebarTimeRepair(0);
     syncActionGroupsLayout();
     updateDeleteButtonOffsets();
     archivedPageRows().forEach(attachArchivedPageDeleteButton);
