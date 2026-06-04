@@ -39,6 +39,10 @@ Maintainer resources:
 - 支付购买链接：[https://corvusapi.org/](https://corvusapi.org/)
 - 官方后台链接：[https://jmrai.net/dashboard/overview](https://jmrai.net/dashboard/overview)
 
+中转站交流群：
+
+<img src="docs/images/corvus-relay-group-qr.jpg" alt="Corvus 中转站交流群二维码" width="260">
+
 ## 主要功能
 
 - 2.0 官方登录态保护面板：先保存第三方 API Key，再引导登录 ChatGPT
