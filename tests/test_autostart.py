@@ -49,6 +49,28 @@ def test_write_macos_launch_agent_creates_valid_plist(tmp_path, monkeypatch):
     assert decoded["WorkingDirectory"] == str(autostart.project_root())
 
 
+def test_macos_launch_agent_python_keeps_project_local_executable(monkeypatch, tmp_path):
+    project = tmp_path / "CodexMate"
+    python = project / ".venv" / "bin" / "python3"
+    monkeypatch.setattr(autostart.sys, "executable", str(python))
+    monkeypatch.setattr(autostart.runtime, "is_frozen", lambda: False)
+
+    assert autostart.macos_launch_agent_python_executable(project) == python
+
+
+def test_macos_launch_agent_python_avoids_external_venv(monkeypatch, tmp_path):
+    project = tmp_path / "CodexMate"
+    external_python = tmp_path / "OtherProject" / ".venv" / "bin" / "python3"
+    base_python = tmp_path / "base" / "bin" / "python3"
+    base_python.parent.mkdir(parents=True)
+    base_python.write_text("", encoding="utf-8")
+    monkeypatch.setattr(autostart.sys, "executable", str(external_python))
+    monkeypatch.setattr(autostart.sys, "base_prefix", str(tmp_path / "base"), raising=False)
+    monkeypatch.setattr(autostart.runtime, "is_frozen", lambda: False)
+
+    assert autostart.macos_launch_agent_python_executable(project) == base_python
+
+
 def test_build_windows_watcher_install_script_registers_run_and_startup_shortcut():
     script = autostart.build_windows_watcher_install_script(debug_port=9444)
     run_key = "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"

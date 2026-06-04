@@ -20,6 +20,9 @@ def test_setup_command_offers_install_and_uninstall_choices():
     assert "run_codex_mate setup" in text
     assert "run_codex_mate remove" in text
     assert "run_codex_mate update" in text
+    assert "Installing Codex Mate LaunchAgent and transparent watcher" in text
+    assert "legacy app shortcut" in text
+    assert "Installing Codex Mate app" not in text
 
 
 def test_setup_command_is_executable():

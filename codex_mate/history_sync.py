@@ -442,6 +442,9 @@ def merge_session_index(paths: HistoryPaths) -> dict[str, int]:
         existing_thread_name = existing.get("thread_name")
         if isinstance(existing_thread_name, str) and existing_thread_name.strip():
             merged_entry["thread_name"] = existing_thread_name
+        existing_updated_at = existing.get("updated_at")
+        if isinstance(existing_updated_at, str) and existing_updated_at.strip():
+            merged_entry["updated_at"] = existing_updated_at
         merged.append(merged_entry)
         seen.add(entry_id)
     for entry in existing_entries:
@@ -610,29 +613,8 @@ def sync_history_if_ready(paths: HistoryPaths) -> dict[str, object]:
     mismatched_provider = int(current_status.get("mismatched_provider_threads") or 0)
     mismatched_model = int(current_status.get("mismatched_model_threads") or 0)
     if mismatched_provider == 0 and mismatched_model == 0:
-        sidecar_result: dict[str, object] = {}
-        if not current_status.get("skipped_database_status"):
-            profile = read_current_profile(paths)
-            timestamp_result = repair_database_thread_timestamps(paths)
-            session_result = update_session_files(paths, profile)
-            index_result = merge_session_index(paths)
-            global_state_result = sync_global_state(paths)
-            sidecar_repaired = (
-                bool(timestamp_result.get("updated_database_timestamps"))
-                or bool(session_result.get("updated_session_files"))
-                or bool(index_result.get("updated_session_index"))
-                or bool(global_state_result.get("updated_global_state"))
-            )
-            sidecar_result = {
-                "sidecar_repaired": sidecar_repaired,
-                **timestamp_result,
-                **session_result,
-                **index_result,
-                **global_state_result,
-            }
         return {
             **current_status,
-            **sidecar_result,
             "skipped": True,
             "reason": "history already matches current provider/model",
         }

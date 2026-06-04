@@ -120,6 +120,23 @@ def test_watch_loop_runs_on_macos_until_keyboard_interrupt(monkeypatch, tmp_path
     assert watcher.watch_loop() == 0
 
 
+def test_macos_takeover_uses_longer_grace_and_backoff(monkeypatch):
+    monkeypatch.setattr(watcher.sys, "platform", "darwin")
+
+    assert watcher.takeover_grace_seconds() == watcher.MACOS_TAKEOVER_GRACE_SECONDS
+    assert watcher.takeover_grace_seconds() > watcher.TAKEOVER_GRACE_SECONDS
+    assert watcher.takeover_grace_seconds() <= 5.0
+    assert watcher.takeover_failure_backoff_seconds() == watcher.MACOS_TAKEOVER_FAILURE_BACKOFF_SECONDS
+    assert watcher.takeover_failure_backoff_seconds() > watcher.TAKEOVER_FAILURE_BACKOFF_SECONDS
+
+
+def test_windows_takeover_keeps_short_grace_and_backoff(monkeypatch):
+    monkeypatch.setattr(watcher.sys, "platform", "win32")
+
+    assert watcher.takeover_grace_seconds() == watcher.TAKEOVER_GRACE_SECONDS
+    assert watcher.takeover_failure_backoff_seconds() == watcher.TAKEOVER_FAILURE_BACKOFF_SECONDS
+
+
 def test_spawn_launcher_detaches_on_macos(monkeypatch):
     calls = []
     monkeypatch.setattr(watcher.sys, "platform", "darwin")
@@ -393,7 +410,7 @@ def test_takeover_passes_running_codex_app_dir_before_killing(monkeypatch):
     assert events == [("stop-launchers", []), ("kill", [123]), ("spawn", [app_dir])]
 
 
-def test_takeover_syncs_history_after_codex_exits_before_spawning_launcher(monkeypatch):
+def test_takeover_syncs_history_after_codex_exits_before_spawning_launcher_on_macos(monkeypatch):
     events = []
 
     class Proc:
@@ -420,6 +437,37 @@ def test_takeover_syncs_history_after_codex_exits_before_spawning_launcher(monke
         ("wait-exit", []),
         ("sync-history", []),
         ("spawn", [None]),
+    ]
+
+
+def test_takeover_syncs_history_after_codex_exits_before_spawning_launcher_on_windows(monkeypatch):
+    events = []
+
+    class Proc:
+        pid = 456
+
+        def poll(self):
+            return None
+
+    monkeypatch.setattr(watcher.sys, "platform", "win32")
+    monkeypatch.setattr(watcher, "stop_launcher_processes", lambda: events.append(("stop-launchers", [])))
+    monkeypatch.setattr(watcher, "find_codex_processes", lambda: [123])
+    monkeypatch.setattr(watcher, "find_windows_codex_app_dir", lambda pids=None: Path("C:/Codex/app"))
+    monkeypatch.setattr(watcher, "kill_processes", lambda pids, force=False: events.append(("kill", list(pids))))
+    monkeypatch.setattr(watcher, "wait_until_no_codex", lambda timeout=watcher.KILL_WAIT_TIMEOUT_SECONDS: events.append(("wait-exit", [])) or True)
+    monkeypatch.setattr(watcher, "sync_history_before_takeover", lambda: events.append(("sync-history", [])), raising=False)
+    monkeypatch.setattr(watcher, "spawn_launcher", lambda app_dir=None: events.append(("spawn", [app_dir])) or Proc())
+    monkeypatch.setattr(watcher, "wait_for_cdp", lambda port: True)
+    monkeypatch.setattr(watcher, "wait_for_helper", lambda port: True)
+    monkeypatch.setattr(watcher.time, "sleep", lambda seconds: None)
+
+    assert watcher.takeover(debug_port=9229) is True
+    assert events == [
+        ("stop-launchers", []),
+        ("kill", [123]),
+        ("wait-exit", []),
+        ("sync-history", []),
+        ("spawn", [Path("C:/Codex/app")]),
     ]
 
 

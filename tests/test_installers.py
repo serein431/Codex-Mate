@@ -5,18 +5,18 @@ from codex_mate.installers import InstallOptions
 
 
 def test_install_dispatches_to_macos(monkeypatch):
-    calls = []
+    cleanup_calls = []
     autostart_calls = []
     watcher_events = []
     monkeypatch.setattr(installers.sys, "platform", "darwin")
-    monkeypatch.setattr(installers, "install_macos_app", lambda options: calls.append(options))
+    monkeypatch.setattr(installers, "remove_macos_app_shortcut", lambda options: cleanup_calls.append(options))
     monkeypatch.setattr(installers.autostart, "install_watcher_autostart", lambda debug_port: autostart_calls.append(debug_port))
     monkeypatch.setattr(installers.watcher, "enable_watcher", lambda: watcher_events.append("enable"))
 
     options = InstallOptions()
     installers.install_codex_mate(options)
 
-    assert calls == [options]
+    assert cleanup_calls == [options]
     assert watcher_events == ["enable"]
     assert autostart_calls == [9229]
 

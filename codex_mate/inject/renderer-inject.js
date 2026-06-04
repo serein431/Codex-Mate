@@ -11,13 +11,16 @@
   const timelineTrackClass = "codex-conversation-timeline-track";
   const timelineMarkerClass = "codex-conversation-timeline-marker";
   const timelineTooltipClass = "codex-conversation-timeline-tooltip";
+  const timelineToggleClass = "codex-conversation-timeline-toggle";
+  const timelinePanelClass = "codex-conversation-timeline-panel";
+  const timelineItemClass = "codex-conversation-timeline-item";
   const timelineTargetClass = "codex-conversation-timeline-target";
   const timelineQuestionLimit = 96;
   const timelineMinTopPercent = 2;
   const timelineMaxTopPercent = 98;
   const timelineMaxMarkerGapPercent = 3.5;
   const styleId = "codex-delete-style";
-  const codexDeleteStyleVersion = "21";
+  const codexDeleteStyleVersion = "25";
   const codexMateMenuId = "codex-mate-menu";
   const codexDeleteVersion = "6";
   const codexExportVersion = "1";
@@ -34,9 +37,9 @@
   const chatsSortDbRefreshIntervalMs = 20000;
   const codexMateVersion = window.__CODEX_MATE_VERSION__ || "dev";
   const codexMateSettingsKey = "codexMateSettings";
-  const codexMateMenuVersion = "26";
-  const codexMateTriggerInstalled = "26";
-  const codexConversationTimelineVersion = "13";
+  const codexMateMenuVersion = "27";
+  const codexMateTriggerInstalled = "27";
+  const codexConversationTimelineVersion = "18";
   const codexThreadScrollVersion = "1";
   const codexThreadScrollKey = "codexMateThreadScroll";
   const codexThreadScrollMaxEntries = 120;
@@ -47,7 +50,52 @@
   const codexThreadScrollRouteHooksVersion = "1";
   const codexThreadScrollUserIntentVersion = "1";
   const codexProjectMoveRuntimeId = `${Date.now()}-${Math.random()}`;
-  const codexMateChromeGateVersion = "1";
+  const codexMateChromeGateVersion = "3";
+  const codexMatePluginListPatchVersion = "4";
+  const codexMatePluginMarketplaceDefaultPatchVersion = "1";
+  const codexMateCuratedMarketplaceNames = new Set(["openai-curated", "openai-curated-remote", "codex-mate-curated"]);
+  const codexMateModulePromises = window.__codexMateModulePromises || new Map();
+  const codexMatePluginListRequestIds = window.__codexMatePluginListRequestIds || new Set();
+
+  function codexMatePatchVersionRank(value) {
+    const raw = value && typeof value === "object" ? value.version : value;
+    const numeric = Number(String(raw || "").match(/\d+/)?.[0] || 0);
+    return Number.isFinite(numeric) ? numeric : 0;
+  }
+
+  function installCodexMateVersionGuard(target, key) {
+    if (!target || typeof target !== "object") return;
+    const descriptor = Object.getOwnPropertyDescriptor(target, key);
+    if (descriptor && descriptor.get?.__codexMateVersionGuard === codexMatePluginListPatchVersion) return;
+    const storeKey = `__codexMateGuarded_${key}`;
+    target[storeKey] = descriptor?.get ? descriptor.get.call(target) : target[key];
+    const getter = function codexMateGuardedVersionGetter() {
+      return this[storeKey];
+    };
+    getter.__codexMateVersionGuard = codexMatePluginListPatchVersion;
+    Object.defineProperty(target, key, {
+      configurable: true,
+      enumerable: true,
+      get: getter,
+      set(value) {
+        if (codexMatePatchVersionRank(value) < codexMatePatchVersionRank(this[storeKey])) return;
+        this[storeKey] = value;
+      },
+    });
+  }
+
+  window.__codexMateModulePromises = codexMateModulePromises;
+  window.__codexMatePluginListRequestIds = codexMatePluginListRequestIds;
+  installCodexMateVersionGuard(window, "__codexMatePluginListRequestPatch");
+  installCodexMateVersionGuard(window, "__codexMatePluginListMessagePatch");
+  installCodexMateVersionGuard(window, "__codexMateChromeGateOverride");
+  window.__codexMatePluginListLoadedVersion = codexMatePluginListPatchVersion;
+  if (window.__codexMatePluginListMessagePatch && window.__codexMatePluginListMessagePatch !== codexMatePluginListPatchVersion) {
+    window.__codexMatePluginListMessagePatch = null;
+  }
+  if (window.__codexMatePluginListRequestPatch && window.__codexMatePluginListRequestPatch !== codexMatePluginListPatchVersion) {
+    window.__codexMatePluginListRequestPatch = null;
+  }
   window.__codexProjectMoveRuntimeId = codexProjectMoveRuntimeId;
   clearTimeout(window.__codexProjectMoveProjectionTimer);
   window.__codexProjectMoveProjectionTimer = null;
@@ -63,9 +111,15 @@
   window.__codexConversationTimelineNodeCounter = window.__codexConversationTimelineNodeCounter || 0;
   window.__codexConversationTimelineCache = window.__codexConversationTimelineCache || {};
   window.__codexConversationTimelineInflight = window.__codexConversationTimelineInflight || {};
+  window.__codexConversationTimelineRetryTimers = window.__codexConversationTimelineRetryTimers || [];
+  window.__codexMatePluginRuntimeRefreshTimers = window.__codexMatePluginRuntimeRefreshTimers || [];
+  (window.__codexMateOfficialPluginMarketplaceTimers || []).forEach((timer) => clearTimeout(timer));
+  window.__codexMateOfficialPluginMarketplaceTimers = [];
   if (window.__codexConversationTimelineRuntimeVersion !== codexConversationTimelineVersion) {
     clearTimeout(window.__codexConversationTimelineRefreshTimer);
     window.__codexConversationTimelineRefreshTimer = null;
+    (window.__codexConversationTimelineRetryTimers || []).forEach((timer) => clearTimeout(timer));
+    window.__codexConversationTimelineRetryTimers = [];
     window.__codexConversationTimelineCache = {};
     window.__codexConversationTimelineInflight = {};
     document.querySelectorAll(`.${timelineClass}, .${timelineTooltipClass}`).forEach((node) => node.remove());
@@ -506,6 +560,69 @@
         padding: 8px 20px 20px;
         overflow-y: auto;
       }
+      .codex-mate-tabs {
+        position: relative;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 6px;
+        margin: 0 0 14px;
+        padding: 4px;
+        border: 1px solid var(--codex-mate-input-border);
+        border-radius: 13px;
+        background: var(--codex-mate-control-bg);
+        box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
+      }
+      .codex-mate-tabs::before {
+        content: "";
+        position: absolute;
+        top: 4px;
+        bottom: 4px;
+        left: 4px;
+        width: calc((100% - 20px) / 3);
+        border: 1px solid var(--codex-mate-success-border);
+        border-radius: 10px;
+        background: var(--codex-mate-popover-bg);
+        box-shadow: 0 8px 18px rgba(15,23,42,.12);
+        transition: transform .16s ease, border-color .16s ease, background .16s ease;
+        pointer-events: none;
+      }
+      .codex-mate-tabs[data-active-tab="connect"]::before {
+        transform: translateX(0);
+      }
+      .codex-mate-tabs[data-active-tab="features"]::before {
+        transform: translateX(calc(100% + 6px));
+      }
+      .codex-mate-tabs[data-active-tab="system"]::before {
+        transform: translateX(calc((100% + 6px) * 2));
+      }
+      .codex-mate-tab {
+        min-height: 38px;
+        position: relative;
+        z-index: 1;
+        border: 0;
+        border-radius: 10px;
+        background: transparent;
+        color: var(--codex-mate-popover-muted);
+        font: 13px/18px system-ui, sans-serif;
+        cursor: pointer;
+        letter-spacing: 0;
+        transition: color .12s ease, transform .12s ease;
+      }
+      .codex-mate-tab:hover,
+      .codex-mate-tab:focus-visible {
+        color: var(--codex-mate-popover-fg);
+        outline: none;
+      }
+      .codex-mate-tab:active {
+        transform: translateY(1px);
+      }
+      .codex-mate-tab[data-active="true"] {
+        color: var(--codex-mate-popover-fg);
+        font-weight: 650;
+      }
+      .codex-mate-tab-panel[hidden] {
+        display: none;
+      }
       .codex-mate-mode-row {
         display: grid;
         grid-template-columns: 1fr;
@@ -547,6 +664,35 @@
                 font-size: 12px;
                 line-height: 1.45;
               }
+      .codex-mate-auth-steps {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 6px;
+      }
+      .codex-mate-auth-step {
+        min-height: 54px;
+        border: 1px solid var(--codex-mate-popover-border);
+        border-radius: 8px;
+        background: var(--codex-mate-popover-bg);
+        color: var(--codex-mate-popover-muted);
+        padding: 8px 9px;
+        font-size: 12px;
+        line-height: 16px;
+      }
+      .codex-mate-auth-step strong {
+        display: block;
+        color: var(--codex-mate-popover-fg);
+        font-size: 12px;
+        line-height: 16px;
+        margin-bottom: 2px;
+      }
+      .codex-mate-auth-step[data-state="ok"] {
+        border-color: var(--codex-mate-success-border);
+        background: var(--codex-mate-success-soft);
+      }
+      .codex-mate-auth-step[data-state="todo"] {
+        border-style: dashed;
+      }
       .codex-mate-mode-switch {
         display: grid;
         grid-template-columns: 1fr 1fr;
@@ -582,6 +728,41 @@
         display: grid;
         gap: 12px;
       }
+      .codex-mate-provider-details {
+        border: 1px solid var(--codex-mate-popover-border);
+        border-radius: 10px;
+        background: var(--codex-mate-card-bg);
+        overflow: hidden;
+      }
+      .codex-mate-provider-details summary {
+        min-height: 42px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        color: var(--codex-mate-popover-fg);
+        cursor: pointer;
+        font-size: 13px;
+        font-weight: 650;
+        line-height: 18px;
+        padding: 0 12px;
+      }
+      .codex-mate-provider-details summary::after {
+        content: "展开";
+        color: var(--codex-mate-popover-muted);
+        font-size: 12px;
+        font-weight: 500;
+      }
+      .codex-mate-provider-details[open] summary {
+        border-bottom: 1px solid var(--codex-mate-popover-border);
+      }
+      .codex-mate-provider-details[open] summary::after {
+        content: "收起";
+      }
+      .codex-mate-provider-details-body {
+        display: grid;
+        gap: 12px;
+        padding: 12px;
+      }
       .codex-mate-cc-switch-card {
         display: grid;
         gap: 10px;
@@ -616,6 +797,9 @@
       .codex-mate-cc-switch-list {
         display: grid;
         gap: 8px;
+        max-height: 190px;
+        overflow-y: auto;
+        padding-right: 2px;
       }
       .codex-mate-cc-switch-empty {
         border: 1px dashed var(--codex-mate-popover-border);
@@ -727,6 +911,7 @@
       @media (max-width: 560px) {
         .codex-mate-provider-modes,
         .codex-mate-provider-grid,
+        .codex-mate-auth-steps,
         .codex-mate-cc-switch-item {
           grid-template-columns: 1fr;
         }
@@ -840,12 +1025,12 @@
       }
       .${timelineClass} {
         position: fixed;
-        top: 88px;
-        right: 14px;
-        bottom: 34px;
-        width: 34px;
+        top: 96px;
+        right: 12px;
+        bottom: 38px;
+        width: 48px;
         z-index: 2147482500;
-        pointer-events: auto;
+        pointer-events: none;
         color: var(--codex-mate-popover-fg);
         font: 12px/16px system-ui, sans-serif;
         letter-spacing: 0;
@@ -867,36 +1052,176 @@
         --codex-timeline-shadow: rgba(255,255,255,.18);
       }
       .${timelineTrackClass} {
+        display: none;
+        position: absolute;
+        top: 0;
+        bottom: 0;
+        right: 13px;
+        width: 24px;
+        border-radius: 999px;
+        background: transparent;
+        opacity: 0;
+        pointer-events: auto;
+        cursor: pointer;
+        transition: opacity .12s ease;
+      }
+      .${timelineTrackClass}::before {
+        content: "";
         position: absolute;
         top: 0;
         bottom: 0;
         left: 50%;
         width: 2px;
-        transform: translateX(-50%);
         border-radius: 999px;
         background: var(--codex-timeline-surface);
-        opacity: .92;
-        pointer-events: none;
+        transform: translateX(-50%);
       }
       .${timelineMarkerClass} {
+        display: none;
         position: absolute;
-        left: 50%;
-        width: 14px;
-        height: 14px;
-        border: 1px solid var(--codex-timeline-border);
+        right: 0;
+        width: 52px;
+        height: 26px;
+        border: 0;
         border-radius: 999px;
-        transform: translate(-50%, -50%);
-        background: var(--codex-timeline-surface);
+        transform: translateY(-50%);
+        background: transparent;
         cursor: pointer;
         pointer-events: auto;
-        box-shadow: 0 4px 16px var(--codex-timeline-shadow);
+        opacity: 0;
+        box-shadow: none;
+        transition: width .12s ease, opacity .12s ease, transform .12s ease;
+      }
+      .${timelineMarkerClass}::before {
+        content: "";
+        position: absolute;
+        top: 50%;
+        right: 22px;
+        width: 7px;
+        height: 7px;
+        border-radius: 999px;
+        background: var(--codex-timeline-surface);
+        opacity: .46;
+        transform: translateY(-50%);
+        transition: width .12s ease, height .12s ease, opacity .12s ease, right .12s ease, box-shadow .12s ease;
+      }
+      .${timelineClass}:hover .${timelineTrackClass},
+      .${timelineClass}[data-panel-open="true"] .${timelineTrackClass} {
+        opacity: .18;
+      }
+      .${timelineClass}:hover .${timelineMarkerClass},
+      .${timelineClass}[data-panel-open="true"] .${timelineMarkerClass},
+      .${timelineMarkerClass}:focus-visible,
+      .${timelineMarkerClass}.codex-conversation-timeline-marker-active {
+        opacity: 1;
       }
       .${timelineMarkerClass}:hover,
       .${timelineMarkerClass}:focus-visible,
       .${timelineMarkerClass}.codex-conversation-timeline-marker-active {
-        background: var(--codex-timeline-surface);
-        box-shadow: 0 0 0 3px color-mix(in srgb, var(--codex-timeline-surface) 36%, transparent), 0 10px 28px var(--codex-timeline-shadow);
+        background: color-mix(in srgb, var(--codex-timeline-surface) 14%, transparent);
+        transform: translateY(-50%) translateX(-4px);
+        box-shadow: none;
         outline: none;
+      }
+      .${timelineMarkerClass}:hover::before,
+      .${timelineMarkerClass}:focus-visible::before,
+      .${timelineMarkerClass}.codex-conversation-timeline-marker-active::before {
+        right: 17px;
+        width: 13px;
+        height: 13px;
+        opacity: 1;
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--codex-timeline-surface) 24%, transparent);
+      }
+      .${timelineToggleClass} {
+        position: absolute;
+        top: 50%;
+        right: 0;
+        width: 48px;
+        height: 44px;
+        display: grid;
+        place-items: center;
+        border: 1px solid var(--codex-timeline-border);
+        border-radius: 14px;
+        background: var(--codex-timeline-surface);
+        color: var(--codex-timeline-text);
+        cursor: pointer;
+        pointer-events: auto;
+        box-shadow: 0 8px 22px var(--codex-timeline-shadow);
+        font: 12px/1 system-ui, sans-serif;
+        font-weight: 650;
+        letter-spacing: 0;
+        transform: translateY(-50%);
+        transition: transform .14s ease, box-shadow .14s ease;
+      }
+      .${timelineToggleClass}:hover,
+      .${timelineToggleClass}:focus-visible,
+      .${timelineToggleClass}[aria-expanded="true"] {
+        outline: none;
+        transform: translateY(-50%) translateX(-4px);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--codex-timeline-surface) 26%, transparent), 0 12px 28px var(--codex-timeline-shadow);
+      }
+      .${timelinePanelClass} {
+        position: absolute;
+        top: 50%;
+        right: 58px;
+        width: min(380px, calc(100vw - 72px));
+        max-height: min(64vh, calc(100vh - 132px));
+        display: grid;
+        gap: 4px;
+        padding: 10px;
+        border: 1px solid var(--codex-timeline-border);
+        border-radius: 14px;
+        background: var(--codex-timeline-surface);
+        color: var(--codex-timeline-text);
+        box-shadow: 0 18px 48px var(--codex-timeline-shadow);
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+        overflow-y: auto;
+        transform: translate(8px, -50%) scale(.98);
+        transform-origin: center right;
+        transition: opacity .12s ease, transform .12s ease, visibility .12s ease;
+      }
+      .${timelineClass}[data-panel-open="true"] .${timelinePanelClass} {
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
+        transform: translate(0, -50%) scale(1);
+      }
+      .${timelineItemClass} {
+        width: 100%;
+        min-height: 42px;
+        display: grid;
+        grid-template-columns: 38px minmax(0, 1fr);
+        align-items: center;
+        gap: 8px;
+        border: 1px solid transparent;
+        border-radius: 10px;
+        background: transparent;
+        color: inherit;
+        cursor: pointer;
+        padding: 7px 8px;
+        text-align: left;
+        font: 12px/16px system-ui, sans-serif;
+        letter-spacing: 0;
+      }
+      .${timelineItemClass}:hover,
+      .${timelineItemClass}:focus-visible,
+      .${timelineItemClass}.codex-conversation-timeline-item-active {
+        outline: none;
+        background: color-mix(in srgb, var(--codex-timeline-text) 10%, transparent);
+        border-color: color-mix(in srgb, var(--codex-timeline-text) 14%, transparent);
+      }
+      .${timelineItemClass} strong {
+        font-weight: 650;
+        font-size: 11px;
+        line-height: 16px;
+        opacity: .72;
+      }
+      .${timelineItemClass} span {
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
       }
       .${timelineTooltipClass} {
         position: fixed;
@@ -1027,8 +1352,19 @@
     return applyCodexMateAuthMode(payload?.auth_enhancement_mode || payload?.authEnhancementMode);
   }
 
-  let codexMateAuthModeStatus = { status: "checking", message: "正在读取增强模式…" };
+  let codexMateAuthModeStatus = { status: "checking", message: "正在读取官方登录态保护…" };
   let codexMateAuthModePayload = null;
+
+  function authProtectionStepState(kind, payload, currentMode) {
+    const providerMode = payload?.provider_mode?.mode || "";
+    const loginReady = payload?.login_preserving_available === true || payload?.provider_mode?.chatgpt_login_token_present === true;
+    const providerApiReady = payload?.provider_api_ready === true || payload?.login_preserving_provider?.ready === true || providerMode === "official" || providerMode === "mixed-api";
+    const loginProtectionReady = payload?.login_preserving_available === true;
+    if (kind === "provider") return providerApiReady ? "ok" : "todo";
+    if (kind === "login") return loginReady ? "ok" : "todo";
+    if (kind === "entry") return currentMode === "loginPreserving" && loginProtectionReady ? "ok" : "todo";
+    return "todo";
+  }
 
   function renderAuthModeStatus() {
     const status = codexMateAuthModeStatus.status || "ok";
@@ -1037,48 +1373,56 @@
     const currentMode = codexMateSettings().authEnhancementMode;
     document.querySelectorAll("[data-codex-mate-auth-mode-status]").forEach((node) => {
       node.dataset.status = status;
-      node.textContent = codexMateAuthModeStatus.message || (status === "ok" ? "增强模式已同步" : "增强模式未同步");
+      node.textContent = codexMateAuthModeStatus.message || (status === "ok" ? "官方登录态保护已同步" : "官方登录态保护未同步");
     });
     document.querySelectorAll("[data-codex-mate-auth-summary]").forEach((node) => {
       node.textContent = payload.summary || (status === "checking" ? "正在检测 ChatGPT 登录" : "未检测到 ChatGPT 登录");
     });
     document.querySelectorAll("[data-codex-mate-auth-detail]").forEach((node) => {
-      node.textContent = payload.detail || "Codex Mate 会先确认本机是否有 ChatGPT 登录态，再决定是否可以启用保留登录态。";
+      node.textContent = payload.detail || "想保留移动端、Remote 和原生入口时，先把第三方 API Key 写入 provider，再登录 ChatGPT。";
+    });
+    document.querySelectorAll("[data-codex-mate-auth-step]").forEach((node) => {
+      const kind = node.getAttribute("data-codex-mate-auth-step") || "";
+      node.dataset.state = authProtectionStepState(kind, payload, currentMode);
     });
     document.querySelectorAll("[data-codex-mate-auth-mode]").forEach((button) => {
       const mode = button.getAttribute("data-codex-mate-auth-mode");
       const waiting = status === "checking" || status === "saving";
-      button.disabled = waiting || (mode === "loginPreserving" && !loginReady);
+      const providerApiReady = payload.provider_api_ready === true || payload.login_preserving_provider?.ready === true;
+      button.disabled = waiting;
       button.dataset.active = String(mode === currentMode);
       button.setAttribute(
         "title",
-        mode === "loginPreserving" && !loginReady
-          ? "请先在 Codex 中登录 ChatGPT，然后重新检测。"
-          : mode === "loginPreserving"
-            ? "启用保留登录态的推荐模式。"
-            : "临时启用前端强制注入。"
+        mode === "loginPreserving" && !providerApiReady
+          ? "先在供应商配置或 CC Switch 中保存第三方 API Key。"
+          : mode === "loginPreserving" && !loginReady
+            ? "先保存 API Key，再登录 ChatGPT；登录后重新检测即可启用。"
+            : mode === "loginPreserving"
+            ? "保留 ChatGPT 登录态，让第三方 API Key 写入 provider。"
+            : "使用前端注入补齐入口，不保护官方登录态。"
       );
     });
     document.querySelectorAll("[data-codex-mate-refresh-auth]").forEach((button) => {
       const waiting = status === "checking" || status === "saving";
       button.disabled = waiting;
-      button.textContent = waiting ? "正在检测…" : loginReady ? "重新检测" : "我已登录，重新检测";
-      button.setAttribute("title", loginReady ? "重新检测 ChatGPT 登录状态。" : "登录 ChatGPT 后重新检测。");
+      const providerApiReady = payload.provider_api_ready === true || payload.login_preserving_provider?.ready === true;
+      button.textContent = waiting ? "正在检测…" : loginReady ? "重新检测" : providerApiReady ? "我已登录，重新检测" : "重新检测";
+      button.setAttribute("title", loginReady ? "重新检测 ChatGPT 登录状态。" : providerApiReady ? "登录 ChatGPT 后重新检测。" : "重新读取本机 provider 和登录状态。");
     });
   }
 
   async function checkCodexMateAuthModeStatus() {
-    codexMateAuthModeStatus = { status: "checking", message: "正在读取增强模式…" };
+    codexMateAuthModeStatus = { status: "checking", message: "正在读取官方登录态保护…" };
     renderAuthModeStatus();
     try {
-      const result = await withTimeout(postJson("/auth-enhancement-mode/status", {}), 2500, "增强模式读取超时");
+      const result = await withTimeout(postJson("/auth-enhancement-mode/status", {}), 2500, "官方登录态保护读取超时");
       codexMateAuthModePayload = result || null;
       if (result?.status === "failed" || !applyCodexMateAuthModePayload(result)) {
-        throw new Error(result?.message || "增强模式读取失败");
+        throw new Error(result?.message || "官方登录态保护读取失败");
       }
-      codexMateAuthModeStatus = { status: "ok", message: result.message || "增强模式已同步" };
+      codexMateAuthModeStatus = { status: "ok", message: result.message || "官方登录态保护已同步" };
     } catch (error) {
-      codexMateAuthModeStatus = { status: "failed", message: bridgeErrorMessage(error, "增强模式读取失败") };
+      codexMateAuthModeStatus = { status: "failed", message: bridgeErrorMessage(error, "官方登录态保护读取失败") };
     }
     renderCodexMateMenu();
     renderAuthModeStatus();
@@ -1086,18 +1430,18 @@
 
   async function setCodexMateAuthMode(mode) {
     if (mode !== "loginPreserving" && mode !== "forceInject") return;
-    codexMateAuthModeStatus = { status: "saving", message: "正在切换增强模式…" };
+    codexMateAuthModeStatus = { status: "saving", message: "正在切换官方登录态保护…" };
     renderAuthModeStatus();
     try {
-      const result = await withTimeout(postJson("/auth-enhancement-mode/set", { mode }), 8000, "增强模式切换超时");
+      const result = await withTimeout(postJson("/auth-enhancement-mode/set", { mode }), 8000, "官方登录态保护切换超时");
       codexMateAuthModePayload = result || null;
       if (result?.status === "failed" || !applyCodexMateAuthModePayload(result)) {
-        throw new Error(result?.message || "增强模式切换失败");
+        throw new Error(result?.message || "官方登录态保护切换失败");
       }
-      codexMateAuthModeStatus = { status: "ok", message: result.message || "增强模式已切换" };
-      showToast(result.message || "增强模式已切换", null);
+      codexMateAuthModeStatus = { status: "ok", message: result.message || "官方登录态保护已切换" };
+      showToast(result.message || "官方登录态保护已切换", null);
     } catch (error) {
-      codexMateAuthModeStatus = { status: "failed", message: bridgeErrorMessage(error, "增强模式切换失败") };
+      codexMateAuthModeStatus = { status: "failed", message: bridgeErrorMessage(error, "官方登录态保护切换失败") };
       showToast(codexMateAuthModeStatus.message, null);
     }
     renderCodexMateMenu();
@@ -1214,7 +1558,7 @@
       codexMateProviderProfileDirty = false;
       applyCodexMateAuthModePayload(result);
       codexMateAuthModePayload = result || codexMateAuthModePayload;
-      codexMateAuthModeStatus = { status: "ok", message: result?.message || "增强模式已同步" };
+      codexMateAuthModeStatus = { status: "ok", message: result?.message || "官方登录态保护已同步" };
       codexMateProviderProfileStatus = { status: "ok", message: result?.message || "供应商已切换" };
       fillProviderProfileForm(result?.profile);
       showToast(result?.message || "供应商已切换", null);
@@ -1234,7 +1578,7 @@
 
   function ccSwitchModeLabel(mode) {
     if (mode === "official") return "官方登录";
-    if (mode === "mixed-api") return "保留登录态 + API";
+    if (mode === "mixed-api") return "官方登录 + 第三方 API";
     if (mode === "pure-api") return "纯 API";
     return "未知模式";
   }
@@ -1316,7 +1660,7 @@
       }
       applyCodexMateAuthModePayload(result);
       codexMateAuthModePayload = result || codexMateAuthModePayload;
-      codexMateAuthModeStatus = { status: "ok", message: result?.message || "增强模式已同步" };
+      codexMateAuthModeStatus = { status: "ok", message: result?.message || "官方登录态保护已同步" };
       codexMateProviderProfileStatus = { status: "ok", message: result?.message || "供应商已切换" };
       codexMateCcSwitchStatus = { status: "ok", message: result?.message || "CC Switch 供应商已切换" };
       showToast(result?.message || "CC Switch 供应商已切换", null);
@@ -1385,6 +1729,12 @@
 
   function bridgeErrorMessage(error, fallback) {
     const message = error?.message || String(error || "");
+    if (/Codex Mate bridge timeout|bridge timeout/i.test(message)) {
+      return "Codex Mate 桥接超时，请重新打开 Codex 或从 Codex Mate 启动器重新接管。";
+    }
+    if (/bridge binding unavailable/i.test(message)) {
+      return "Codex Mate 桥接未连接，请重新打开 Codex 或从 Codex Mate 启动器重新接管。";
+    }
     return message || fallback;
   }
 
@@ -1400,7 +1750,7 @@
     if (path === "/backend/status") return 700;
     if (path === "/provider-profile/status" || path === "/auth-enhancement-mode/status") return 1200;
     if (path === "/cc-switch/providers") return 1200;
-    if (path === "/cc-switch/apply") return 2500;
+    if (path === "/cc-switch/apply") return 30000;
     if (path === "/conversation-timeline") return 2000;
     return 2500;
   }
@@ -1458,6 +1808,21 @@
     });
   }
 
+  function setCodexMateActiveTab(tab) {
+    const nextTab = tab === "features" || tab === "system" ? tab : "connect";
+    document.querySelectorAll(".codex-mate-tabs").forEach((node) => {
+      node.dataset.activeTab = nextTab;
+    });
+    document.querySelectorAll("[data-codex-mate-tab]").forEach((button) => {
+      const active = button.getAttribute("data-codex-mate-tab") === nextTab;
+      button.dataset.active = String(active);
+      button.setAttribute("aria-selected", String(active));
+    });
+    document.querySelectorAll("[data-codex-mate-tab-panel]").forEach((panel) => {
+      panel.hidden = panel.getAttribute("data-codex-mate-tab-panel") !== nextTab;
+    });
+  }
+
   function openCodexMateModal() {
     document.querySelectorAll(".codex-mate-modal-overlay").forEach((node) => node.remove());
     document.querySelectorAll('[data-codex-mate-dialog="true"]').forEach((node) => node.remove());
@@ -1472,61 +1837,85 @@
           <button type="button" class="codex-mate-modal-close" aria-label="关闭">×</button>
         </div>
         <div class="codex-mate-modal-body">
-          <div class="codex-mate-mode-row">
-            <div class="codex-mate-mode-header">
-              <div class="codex-mate-mode-title">供应商配置</div>
-              <div class="codex-mate-mode-description">在这里填 API，不需要手动改 config.toml 或 auth.json。</div>
-            </div>
-            <div class="codex-mate-cc-switch-card">
-              <div class="codex-mate-cc-switch-header">
+          <div class="codex-mate-tabs" role="tablist" aria-label="Codex Mate 分区" data-active-tab="connect">
+            <button type="button" class="codex-mate-tab" data-codex-mate-tab="connect" data-active="true" aria-selected="true">连接设置</button>
+            <button type="button" class="codex-mate-tab" data-codex-mate-tab="features" data-active="false" aria-selected="false">会话功能</button>
+            <button type="button" class="codex-mate-tab" data-codex-mate-tab="system" data-active="false" aria-selected="false">系统工具</button>
+          </div>
+          <div class="codex-mate-tab-panel" data-codex-mate-tab-panel="connect">
+            <div class="codex-mate-mode-row">
+              <div class="codex-mate-mode-header">
+                <div class="codex-mate-mode-title">官方登录态保护</div>
+                <div class="codex-mate-mode-description">想保留移动端、Remote 和原生入口时，先看这里。</div>
+              </div>
+              <div class="codex-mate-auth-card">
                 <div>
-                  <div class="codex-mate-cc-switch-title">CC Switch 速切</div>
-                  <div class="codex-mate-cc-switch-description">读取 ~/.cc-switch/cc-switch.db 中的 Codex 供应商。</div>
+                  <div class="codex-mate-row-title">当前状态</div>
+                  <div class="codex-mate-auth-summary" data-codex-mate-auth-summary="true">正在检测 ChatGPT 登录</div>
+                  <div class="codex-mate-auth-detail" data-codex-mate-auth-detail="true">先把第三方 API Key 写入 provider，再登录 ChatGPT。</div>
                 </div>
-                <button type="button" class="codex-mate-action-button" data-codex-mate-cc-switch-refresh="true">刷新</button>
+                <button type="button" class="codex-mate-action-button" data-codex-mate-refresh-auth="true">重新检测</button>
               </div>
-              <div class="codex-mate-cc-switch-status" data-codex-mate-cc-switch-status="true" data-status="checking">正在读取 CC Switch 供应商…</div>
-              <div class="codex-mate-cc-switch-list" data-codex-mate-cc-switch-list="true"></div>
+              <div class="codex-mate-auth-steps" aria-label="官方登录态保护步骤">
+                <div class="codex-mate-auth-step" data-codex-mate-auth-step="provider"><strong>1. 第三方 API</strong>API Key 已写入 provider</div>
+                <div class="codex-mate-auth-step" data-codex-mate-auth-step="login"><strong>2. 官方账号</strong>Codex 已登录 ChatGPT</div>
+                <div class="codex-mate-auth-step" data-codex-mate-auth-step="entry"><strong>3. 原生入口</strong>移动端和 Remote 优先可用</div>
+              </div>
+              <div class="codex-mate-mode-switch" role="group" aria-label="官方登录态保护">
+                <button type="button" class="codex-mate-mode-option" data-codex-mate-auth-mode="loginPreserving"><strong>保护官方登录</strong><span>保留 ChatGPT 登录，第三方 API Key 只写 provider。</span></button>
+                <button type="button" class="codex-mate-mode-option" data-codex-mate-auth-mode="forceInject"><strong>仅使用兼容模式</strong><span>只补齐入口，不保留移动端或 Remote。</span></button>
+              </div>
+              <div class="codex-mate-mode-status" data-codex-mate-auth-mode-status="true" data-status="checking">正在读取官方登录态保护…</div>
             </div>
-            <div class="codex-mate-provider-form">
-              <div class="codex-mate-provider-modes" role="group" aria-label="供应商模式">
-                <button type="button" class="codex-mate-provider-mode" data-codex-mate-provider-mode="official">官方登录<br><span>不写 API Key</span></button>
-                <button type="button" class="codex-mate-provider-mode" data-codex-mate-provider-mode="mixed-api">保留登录态 + API<br><span>需要先登录 ChatGPT</span></button>
-                <button type="button" class="codex-mate-provider-mode" data-codex-mate-provider-mode="pure-api">纯 API<br><span>写入 auth.json</span></button>
+            <div class="codex-mate-mode-row">
+              <div class="codex-mate-mode-header">
+                <div class="codex-mate-mode-title">CC Switch 速切</div>
+                <div class="codex-mate-mode-description">有现成供应商时，直接切换最快。</div>
               </div>
-              <div class="codex-mate-provider-grid">
-                <label class="codex-mate-provider-field"><span>Provider 名称</span><input data-codex-mate-provider-field="provider" autocomplete="off" spellcheck="false" value="codex-mate"></label>
-                <label class="codex-mate-provider-field"><span>Model</span><input data-codex-mate-provider-field="model" autocomplete="off" spellcheck="false" placeholder="例如 gpt-5.5"></label>
-                <label class="codex-mate-provider-field"><span>Base URL</span><input data-codex-mate-provider-field="base_url" autocomplete="off" spellcheck="false" placeholder="https://example.com/v1"></label>
-                <label class="codex-mate-provider-field"><span>API Key</span><input data-codex-mate-provider-field="api_key" type="password" autocomplete="off" spellcheck="false" placeholder="粘贴 API Key"></label>
-                <label class="codex-mate-provider-field"><span>Wire API</span><select data-codex-mate-provider-field="wire_api"><option value="responses">responses</option><option value="chat">chat</option></select></label>
+              <div class="codex-mate-cc-switch-card">
+                <div class="codex-mate-cc-switch-header">
+                  <div>
+                    <div class="codex-mate-cc-switch-title">本机 Codex 供应商</div>
+                    <div class="codex-mate-cc-switch-description">读取 ~/.cc-switch/cc-switch.db。</div>
+                  </div>
+                  <button type="button" class="codex-mate-action-button" data-codex-mate-cc-switch-refresh="true">刷新</button>
+                </div>
+                <div class="codex-mate-cc-switch-status" data-codex-mate-cc-switch-status="true" data-status="checking">正在读取 CC Switch 供应商…</div>
+                <div class="codex-mate-cc-switch-list" data-codex-mate-cc-switch-list="true"></div>
               </div>
-              <div class="codex-mate-provider-footer">
-                <div class="codex-mate-provider-status" data-codex-mate-provider-status="true" data-status="checking">正在读取供应商配置…</div>
-                <button type="button" class="codex-mate-action-button" data-codex-mate-provider-apply="true">切换供应商</button>
+            </div>
+            <div class="codex-mate-mode-row">
+              <div class="codex-mate-mode-header">
+                <div class="codex-mate-mode-title">手动供应商配置</div>
+                <div class="codex-mate-mode-description">只有需要手填 API 时再展开。</div>
               </div>
+              <details class="codex-mate-provider-details">
+                <summary>展开手动配置</summary>
+                <div class="codex-mate-provider-details-body">
+                  <div class="codex-mate-provider-form">
+                    <div class="codex-mate-provider-modes" role="group" aria-label="供应商模式">
+                      <button type="button" class="codex-mate-provider-mode" data-codex-mate-provider-mode="official">官方登录<br><span>不写 API Key</span></button>
+                      <button type="button" class="codex-mate-provider-mode" data-codex-mate-provider-mode="mixed-api">官方登录 + 第三方 API<br><span>保留移动端/Remote</span></button>
+                      <button type="button" class="codex-mate-provider-mode" data-codex-mate-provider-mode="pure-api">纯 API<br><span>写入 auth.json</span></button>
+                    </div>
+                    <div class="codex-mate-provider-grid">
+                      <label class="codex-mate-provider-field"><span>Provider 名称</span><input data-codex-mate-provider-field="provider" autocomplete="off" spellcheck="false" value="codex-mate"></label>
+                      <label class="codex-mate-provider-field"><span>Model</span><input data-codex-mate-provider-field="model" autocomplete="off" spellcheck="false" placeholder="例如 gpt-5.5"></label>
+                      <label class="codex-mate-provider-field"><span>Base URL</span><input data-codex-mate-provider-field="base_url" autocomplete="off" spellcheck="false" placeholder="https://example.com/v1"></label>
+                      <label class="codex-mate-provider-field"><span>API Key</span><input data-codex-mate-provider-field="api_key" type="password" autocomplete="off" spellcheck="false" placeholder="粘贴 API Key"></label>
+                      <label class="codex-mate-provider-field"><span>Wire API</span><select data-codex-mate-provider-field="wire_api"><option value="responses">responses</option><option value="chat">chat</option></select></label>
+                    </div>
+                    <div class="codex-mate-provider-footer">
+                      <div class="codex-mate-provider-status" data-codex-mate-provider-status="true" data-status="checking">正在读取供应商配置…</div>
+                      <button type="button" class="codex-mate-action-button" data-codex-mate-provider-apply="true">切换供应商</button>
+                    </div>
+                  </div>
+                </div>
+              </details>
             </div>
           </div>
-          <div class="codex-mate-mode-row">
-            <div class="codex-mate-mode-header">
-              <div class="codex-mate-mode-title">增强模式</div>
-              <div class="codex-mate-mode-description">先检测 ChatGPT 登录态，再给出推荐操作。</div>
-            </div>
-            <div class="codex-mate-auth-card">
-              <div>
-                <div class="codex-mate-row-title">当前检测</div>
-                <div class="codex-mate-auth-summary" data-codex-mate-auth-summary="true">正在检测 ChatGPT 登录</div>
-                <div class="codex-mate-auth-detail" data-codex-mate-auth-detail="true">Codex Mate 会先确认本机是否有 ChatGPT 登录态，再决定是否可以启用保留登录态。</div>
-              </div>
-              <button type="button" class="codex-mate-action-button" data-codex-mate-refresh-auth="true">我已登录，重新检测</button>
-            </div>
-            <div class="codex-mate-mode-switch" role="group" aria-label="增强模式">
-              <button type="button" class="codex-mate-mode-option" data-codex-mate-auth-mode="loginPreserving"><strong>启用推荐模式</strong><span>保持登录态，移动端、Remote 和原生入口优先可用。</span></button>
-              <button type="button" class="codex-mate-mode-option" data-codex-mate-auth-mode="forceInject"><strong>临时启用强制注入</strong><span>不改登录文件，只由前端接管插件入口。</span></button>
-            </div>
-            <div class="codex-mate-mode-status" data-codex-mate-auth-mode-status="true" data-status="checking">正在读取增强模式…</div>
-          </div>
-          <div class="codex-mate-row">
+          <div class="codex-mate-tab-panel" data-codex-mate-tab-panel="features" hidden>
+            <div class="codex-mate-row">
             <div><div class="codex-mate-row-title">会话删除</div><div class="codex-mate-row-description">在会话列表悬停显示删除按钮，并支持撤销。</div></div>
             <button type="button" class="codex-mate-toggle" data-codex-mate-setting="sessionDelete"><span></span></button>
           </div>
@@ -1553,6 +1942,8 @@
             <div><div class="codex-mate-row-title">原生菜单栏位置</div><div class="codex-mate-row-description">把 Codex Mate 菜单插入顶部原生菜单栏；默认关闭以避免页面重渲染冲突。</div></div>
             <button type="button" class="codex-mate-toggle" data-codex-mate-setting="nativeMenuPlacement"><span></span></button>
           </div>
+          </div>
+          <div class="codex-mate-tab-panel" data-codex-mate-tab-panel="system" hidden>
           <div class="codex-mate-row">
             <div><div class="codex-mate-row-title">后端连接</div><div class="codex-mate-backend-label" data-codex-mate-backend-status="true" data-status="checking">正在检查后端…</div></div>
             <button type="button" class="codex-mate-action-button" data-codex-mate-check-backend="true">刷新</button>
@@ -1570,6 +1961,7 @@
           <div class="codex-mate-row">
             <div><div class="codex-mate-row-title">提出问题</div><div class="codex-mate-row-description">打开 GitHub Issues 反馈问题或建议。</div></div>
             <button type="button" class="codex-mate-issue-button" data-codex-mate-issue="true">提出问题</button>
+          </div>
           </div>
         </div>
       </div>
@@ -1598,6 +1990,11 @@
       const checkBackendButton = closestElement(event.target, "[data-codex-mate-check-backend]");
       if (checkBackendButton) {
         void checkBackendStatus();
+        return;
+      }
+      const tabButton = closestElement(event.target, "[data-codex-mate-tab]");
+      if (tabButton) {
+        setCodexMateActiveTab(tabButton.getAttribute("data-codex-mate-tab"));
         return;
       }
       const providerModeButton = closestElement(event.target, "[data-codex-mate-provider-mode]");
@@ -1667,6 +2064,7 @@
     }, true);
     document.body.appendChild(overlay);
     overlay.querySelector(".codex-mate-modal-close")?.focus?.({ preventScroll: true });
+    setCodexMateActiveTab("connect");
     renderCodexMateMenu();
     renderAuthModeStatus();
     renderProviderProfileStatus();
@@ -1861,6 +2259,33 @@
     return true;
   }
 
+  function spoofChatGPTAuthContexts() {
+    if (!codexMateSettings().pluginEntryUnlock) return 0;
+    const candidates = [
+      document.documentElement,
+      document.body,
+      ...document.querySelectorAll('nav[role="navigation"], main, button, [role="button"]'),
+    ].filter(Boolean);
+    const seen = new Set();
+    let updated = 0;
+    candidates.forEach((element) => {
+      const auth = authContextValueFrom(element);
+      if (!auth || seen.has(auth)) return;
+      seen.add(auth);
+      if (auth.authMethod === "chatgpt") return;
+      auth.setAuthMethod("chatgpt");
+      updated += 1;
+    });
+    return updated;
+  }
+
+  function preparePluginRuntimeUnlock() {
+    if (!codexMateSettings().pluginEntryUnlock) return;
+    spoofChatGPTAuthContexts();
+    refreshPluginRuntimeUnlock();
+    schedulePluginRuntimeUnlockRefresh();
+  }
+
   function pluginEntryButton() {
     return document.querySelector('nav[role="navigation"] button.h-token-nav-row.w-full svg path[d^="M7.94562 14.0277"]')?.closest("button");
   }
@@ -1879,7 +2304,7 @@
     if (!codexMateSettings().pluginEntryUnlock) return;
     const pluginButton = pluginEntryButton();
     if (!pluginButton) return;
-    spoofChatGPTAuthMethod(pluginButton);
+    preparePluginRuntimeUnlock();
     pluginButton.disabled = false;
     pluginButton.removeAttribute("disabled");
     pluginButton.style.display = "";
@@ -1891,15 +2316,20 @@
     if (reactPropsKey) {
       pluginButton[reactPropsKey].disabled = false;
     }
-    if (pluginButton.dataset.codexPluginEnabled === "true") return;
+    if (pluginButton.dataset.codexPluginEnabled === "true" && pluginButton.dataset.codexPluginEnabledVersion === codexMatePluginListPatchVersion) return;
     pluginButton.dataset.codexPluginEnabled = "true";
+    pluginButton.dataset.codexPluginEnabledVersion = codexMatePluginListPatchVersion;
     pluginButton.addEventListener("click", () => {
-      spoofChatGPTAuthMethod(pluginButton);
+      preparePluginRuntimeUnlock();
     }, true);
   }
 
-  function chromePluginGateNames() {
-    return new Set(["410065390", "browser_use_external"]);
+  function pluginGateOverrides() {
+    return new Map([
+      ["410065390", true],
+      ["browser_use_external", true],
+      ["4218407052", true],
+    ]);
   }
 
   function statsigClients() {
@@ -1912,28 +2342,459 @@
 
   function installChromePluginGateOverride() {
     if (!codexMateSettings().pluginEntryUnlock) return;
-    const gates = chromePluginGateNames();
+    const gateOverrides = pluginGateOverrides();
     statsigClients().forEach((client) => {
+      installCodexMateVersionGuard(client, "__codexMateChromeGateVersion");
       if (client.__codexMateChromeGateVersion === codexMateChromeGateVersion) return;
       const originalCheckGate = typeof client.checkGate === "function" ? client.checkGate.bind(client) : null;
       const originalGetFeatureGate = typeof client.getFeatureGate === "function" ? client.getFeatureGate.bind(client) : null;
-      const forceGate = (name) => gates.has(String(name || "").trim());
+      const gateOverride = (name) => gateOverrides.get(String(name || "").trim());
       if (originalCheckGate) {
-        client.checkGate = (name, ...args) => forceGate(name) || originalCheckGate(name, ...args);
+        client.checkGate = (name, ...args) => {
+          const override = gateOverride(name);
+          return typeof override === "boolean" ? override : originalCheckGate(name, ...args);
+        };
       }
       if (originalGetFeatureGate) {
         client.getFeatureGate = (name, ...args) => {
           const gate = originalGetFeatureGate(name, ...args);
-          if (!forceGate(name)) return gate;
+          const override = gateOverride(name);
+          if (typeof override !== "boolean") return gate;
           if (!gate || typeof gate !== "object") {
-            return { name, value: true, ruleID: "codex-mate-force-enabled" };
+            return { name, value: override, ruleID: "codex-mate-force-enabled" };
           }
-          return { ...gate, value: true, ruleID: gate.ruleID || "codex-mate-force-enabled" };
+          return { ...gate, value: override, ruleID: gate.ruleID || "codex-mate-force-enabled" };
         };
       }
       client.__codexMateChromeGateVersion = codexMateChromeGateVersion;
     });
     window.__codexMateChromeGateOverride = { installedAt: Date.now(), version: codexMateChromeGateVersion };
+  }
+
+  function refreshPluginRuntimeUnlock() {
+    window.__codexMatePluginRuntimeRefreshVersion = codexMatePluginListPatchVersion;
+    window.__codexMatePluginRuntimeRefreshCount = (Number(window.__codexMatePluginRuntimeRefreshCount) || 0) + 1;
+    installChromePluginGateOverride();
+    installPluginMarketplaceDefaultPatch();
+    installPluginListMarketplacePatch();
+  }
+
+  function schedulePluginRuntimeUnlockRefresh() {
+    (window.__codexMatePluginRuntimeRefreshTimers || []).forEach((timer) => clearTimeout(timer));
+    window.__codexMatePluginRuntimeRefreshTimers = [120, 420, 900, 1800, 3200].map((delay) => setTimeout(() => {
+      refreshPluginRuntimeUnlock();
+    }, delay));
+  }
+
+  function codexAppAssetUrl(namePart) {
+    const urls = [
+      ...Array.from(document.scripts || []).map((script) => script.src),
+      ...Array.from(document.querySelectorAll("link[href]") || []).map((link) => link.href),
+      ...performance.getEntriesByType("resource").map((entry) => entry.name),
+    ].filter(Boolean);
+    return urls.find((url) => url.includes("/assets/") && url.includes(namePart) && url.split("?")[0].endsWith(".js")) || "";
+  }
+
+  async function loadCodexAppModule(namePart) {
+    if (!codexMateModulePromises.has(namePart)) {
+      const promise = Promise.resolve().then(async () => {
+        const url = codexAppAssetUrl(namePart);
+        if (!url) throw new Error(`Codex asset not found: ${namePart}`);
+        return await import(url);
+      }).catch((error) => {
+        codexMateModulePromises.delete(namePart);
+        throw error;
+      });
+      codexMateModulePromises.set(namePart, promise);
+    }
+    return await codexMateModulePromises.get(namePart);
+  }
+
+  function pluginMarketplaceText(value) {
+    return String(value || "").replace(/\s+/g, " ").trim();
+  }
+
+  function pluginMarketplaceValue(optionOrValue) {
+    if (optionOrValue && typeof optionOrValue === "object") return pluginMarketplaceText(optionOrValue.value);
+    return pluginMarketplaceText(optionOrValue);
+  }
+
+  function isBundledPluginMarketplaceValue(value) {
+    const current = pluginMarketplaceValue(value).toLowerCase();
+    return current === "openai-bundled"
+      || current === "openai-bundled-remote"
+      || current.includes("/bundled-marketplaces/openai-bundled/");
+  }
+
+  function isOfficialPluginMarketplaceValue(value) {
+    const current = pluginMarketplaceValue(value).toLowerCase();
+    if (!current) return false;
+    return current === "openai-curated"
+      || current === "openai-curated-remote"
+      || (current.includes("/.codex/.tmp/plugins/.agents/plugins/marketplace.json") && !current.includes("/bundled-marketplaces/"));
+  }
+
+  function isOfficialPluginMarketplaceOption(option) {
+    if (!option || typeof option !== "object") return false;
+    const label = pluginMarketplaceText(option.label);
+    return isOfficialPluginMarketplaceValue(option.value)
+      || /^Built by OpenAI$/i.test(label)
+      || /^OpenAI Curated$/i.test(label)
+      || /^Codex Official$/i.test(label)
+      || /^官方插件$/i.test(label);
+  }
+
+  function isBundledPluginMarketplaceOption(option) {
+    if (!option || typeof option !== "object") return false;
+    const label = pluginMarketplaceText(option.label);
+    return isBundledPluginMarketplaceValue(option.value) || /^OpenAI Bundled$/i.test(label);
+  }
+
+  function officialPluginMarketplaceOption(options) {
+    return Array.isArray(options) ? options.find(isOfficialPluginMarketplaceOption) || null : null;
+  }
+
+  function shouldPreferOfficialPluginMarketplaceValue(value, options) {
+    if (value == null || pluginMarketplaceValue(value) === "") return true;
+    if (isBundledPluginMarketplaceValue(value)) return true;
+    if (!Array.isArray(options)) return false;
+    return !options.some((option) => pluginMarketplaceValue(option.value) === pluginMarketplaceValue(value));
+  }
+
+  function dedupePluginMarketplaceOptions(options) {
+    const seen = new Set();
+    return options.filter((option) => {
+      const value = pluginMarketplaceValue(option?.value);
+      if (!value || seen.has(value)) return false;
+      seen.add(value);
+      return true;
+    });
+  }
+
+  function normalizePluginMarketplaceControlsProps(props) {
+    if (!props || typeof props !== "object" || Array.isArray(props)) return props;
+    if (!Array.isArray(props.marketplaceFilterOptions) || !Array.isArray(props.primaryMarketplaceTabs)) return props;
+    if (!Object.prototype.hasOwnProperty.call(props, "selectedMarketplaceFilterValue")) return props;
+    const official = officialPluginMarketplaceOption(props.marketplaceFilterOptions);
+    if (!official) return props;
+    const officialValue = pluginMarketplaceValue(official.value);
+    if (!officialValue) return props;
+    let changed = false;
+    const next = { ...props };
+    if (shouldPreferOfficialPluginMarketplaceValue(props.selectedMarketplaceFilterValue, props.marketplaceFilterOptions)) {
+      next.selectedMarketplaceFilterValue = officialValue;
+      changed = true;
+    }
+    const normalizedTabs = props.primaryMarketplaceTabs.map((tab) => {
+      if (!isBundledPluginMarketplaceOption(tab)) return tab;
+      changed = true;
+      return {
+        ...tab,
+        value: officialValue,
+        subLabel: official.subLabel ?? tab.subLabel ?? null,
+      };
+    });
+    const dedupedTabs = dedupePluginMarketplaceOptions(normalizedTabs);
+    if (dedupedTabs.length !== normalizedTabs.length) changed = true;
+    if (changed) {
+      next.primaryMarketplaceTabs = dedupedTabs;
+      window.__codexMatePluginMarketplaceDefaultsPatchedAt = Date.now();
+      window.__codexMatePluginMarketplaceDefaultsPatchCount = (Number(window.__codexMatePluginMarketplaceDefaultsPatchCount) || 0) + 1;
+    }
+    return changed ? next : props;
+  }
+
+  function patchJsxRuntimePluginMarketplaceDefaults(runtime) {
+    if (!runtime || typeof runtime !== "object" || typeof runtime.jsx !== "function" || typeof runtime.jsxs !== "function") return false;
+    if (runtime.__codexMatePluginMarketplaceDefaultPatchVersion === codexMatePluginMarketplaceDefaultPatchVersion) return true;
+    const originalJsx = runtime.__codexMatePluginMarketplaceDefaultOriginalJsx || runtime.jsx;
+    const originalJsxs = runtime.__codexMatePluginMarketplaceDefaultOriginalJsxs || runtime.jsxs;
+    runtime.__codexMatePluginMarketplaceDefaultOriginalJsx = originalJsx;
+    runtime.__codexMatePluginMarketplaceDefaultOriginalJsxs = originalJsxs;
+    runtime.jsx = function codexMatePluginMarketplaceDefaultJsx(type, props, key) {
+      return originalJsx.call(this, type, normalizePluginMarketplaceControlsProps(props), key);
+    };
+    runtime.jsxs = function codexMatePluginMarketplaceDefaultJsxs(type, props, key) {
+      return originalJsxs.call(this, type, normalizePluginMarketplaceControlsProps(props), key);
+    };
+    runtime.__codexMatePluginMarketplaceDefaultPatchVersion = codexMatePluginMarketplaceDefaultPatchVersion;
+    return true;
+  }
+
+  function jsxRuntimeCandidates(module) {
+    const values = Object.values(module || {});
+    return values.flatMap((value) => {
+      if (value && typeof value === "object") return [value];
+      if (typeof value !== "function") return [];
+      try {
+        const result = value();
+        return result && typeof result === "object" ? [result] : [];
+      } catch {
+        return [];
+      }
+    });
+  }
+
+  function installPluginMarketplaceDefaultPatch() {
+    if (!codexMateSettings().pluginEntryUnlock) return;
+    if (window.__codexMatePluginMarketplaceDefaultPatch === codexMatePluginMarketplaceDefaultPatchVersion) return;
+    const patch = async () => {
+      try {
+        const module = await loadCodexAppModule("jsx-runtime-");
+        const patched = jsxRuntimeCandidates(module).filter(patchJsxRuntimePluginMarketplaceDefaults).length;
+        if (patched > 0) {
+          window.__codexMatePluginMarketplaceDefaultPatch = codexMatePluginMarketplaceDefaultPatchVersion;
+        }
+      } catch (error) {
+        window.__codexMatePluginListPatchFailures = window.__codexMatePluginListPatchFailures || [];
+        window.__codexMatePluginListPatchFailures.push(String(error?.stack || error));
+      }
+    };
+    void patch();
+  }
+
+  function pluginListRequestMethod(method, params) {
+    if (method === "send-cli-request-for-host" && params?.method) return String(params.method || "");
+    return String(method || "");
+  }
+
+  function isPluginListRequest(method, params) {
+    const normalized = pluginListRequestMethod(method, params);
+    return normalized === "plugin/list" || normalized === "list-plugins" || normalized === "listPlugins";
+  }
+
+  function rememberPluginRequest(method, params, patchedParams = null) {
+    const summary = `${String(method || "")} ${String(pluginListRequestMethod(method, params) || "")} ${JSON.stringify(params || {}).slice(0, 700)}`;
+    if (!/plugin|marketplace|market|list/i.test(summary)) return;
+    window.__codexMatePluginRequestLog = window.__codexMatePluginRequestLog || [];
+    window.__codexMatePluginRequestLog.push({
+      at: Date.now(),
+      method: String(method || ""),
+      normalized: pluginListRequestMethod(method, params),
+      params: JSON.stringify(params || {}).slice(0, 1200),
+      patchedParams: patchedParams ? JSON.stringify(patchedParams || {}).slice(0, 1200) : "",
+    });
+    window.__codexMatePluginRequestLog = window.__codexMatePluginRequestLog.slice(-25);
+  }
+
+  function officialPluginMarketplaceName(value) {
+    const current = String(value || "").trim();
+    if (!current || current === "openai-bundled" || current === "openai-bundled-remote") return "openai-curated";
+    if (codexMateCuratedMarketplaceNames.has(current)) return "openai-curated";
+    return current;
+  }
+
+  function normalizedCuratedPluginMarketplaceName(name, marketplacePath = "", displayName = "") {
+    const current = String(name || "").trim();
+    if (codexMateCuratedMarketplaceNames.has(current)) return "openai-curated";
+    if (isOfficialPluginMarketplaceValue(marketplacePath)) return "openai-curated";
+    if (/^(Codex Official|OpenAI Curated|Built by OpenAI)$/i.test(pluginMarketplaceText(displayName))) {
+      return "openai-curated";
+    }
+    return current;
+  }
+
+  function patchPluginListRequestParams(params) {
+    if (!params || typeof params !== "object" || Array.isArray(params)) return params;
+    let changed = false;
+    const next = { ...params };
+    ["marketplaceName", "marketplace", "marketplace_name"].forEach((key) => {
+      if (!Object.prototype.hasOwnProperty.call(next, key)) return;
+      const value = officialPluginMarketplaceName(next[key]);
+      if (value !== next[key]) {
+        next[key] = value;
+        changed = true;
+      }
+    });
+    ["params", "payload", "arguments", "request"].forEach((key) => {
+      const value = next[key];
+      if (!value || typeof value !== "object" || Array.isArray(value)) return;
+      const patched = patchPluginListRequestParams(value);
+      if (patched !== value) {
+        next[key] = patched;
+        changed = true;
+      }
+    });
+    if (!changed && !("marketplaceName" in next) && !("marketplace" in next) && !("marketplace_name" in next)) {
+      next.marketplaceName = "openai-curated";
+      changed = true;
+    }
+    return changed ? next : params;
+  }
+
+  function cloneCuratedMarketplaceForDisplay(marketplace) {
+    if (!marketplace || typeof marketplace !== "object") return marketplace;
+    const name = String(marketplace.name || "");
+    const interfaceValue = marketplace.interface && typeof marketplace.interface === "object" ? marketplace.interface : {};
+    const normalizedName = normalizedCuratedPluginMarketplaceName(name, marketplace.path, interfaceValue.displayName);
+    if (normalizedName === name && !codexMateCuratedMarketplaceNames.has(name)) return marketplace;
+    return {
+      ...marketplace,
+      name: normalizedName,
+      interface: {
+        ...interfaceValue,
+        displayName: interfaceValue.displayName || "OpenAI Curated",
+      },
+      plugins: Array.isArray(marketplace.plugins)
+        ? marketplace.plugins.map((plugin) => ({ ...plugin }))
+        : marketplace.plugins,
+    };
+  }
+
+  function cloneCuratedPluginForDisplay(plugin) {
+    if (!plugin || typeof plugin !== "object") return plugin;
+    const marketplaceName = String(plugin.marketplaceName || "");
+    const normalizedName = normalizedCuratedPluginMarketplaceName(
+      marketplaceName,
+      plugin.marketplacePath,
+      plugin.marketplaceDisplayName,
+    );
+    if (normalizedName === marketplaceName && !codexMateCuratedMarketplaceNames.has(marketplaceName)) return plugin;
+    return {
+      ...plugin,
+      marketplaceName: normalizedName,
+      marketplaceDisplayName: plugin.marketplaceDisplayName || "OpenAI Curated",
+    };
+  }
+
+  function patchPluginListResult(result) {
+    if (!result || typeof result !== "object") return result;
+    let changed = false;
+    const patchContainer = (container) => {
+      if (!container || typeof container !== "object") return container;
+      let containerChanged = false;
+      const next = { ...container };
+      if (Array.isArray(container.marketplaces)) {
+        const marketplaces = container.marketplaces.map((marketplace) => {
+          const patched = cloneCuratedMarketplaceForDisplay(marketplace);
+          if (patched !== marketplace) containerChanged = true;
+          return patched;
+        });
+        next.marketplaces = marketplaces;
+      }
+      if (Array.isArray(container.plugins)) {
+        const plugins = container.plugins.map((plugin) => {
+          const patched = cloneCuratedPluginForDisplay(plugin);
+          if (patched !== plugin) containerChanged = true;
+          return patched;
+        });
+        next.plugins = plugins;
+      }
+      if (Array.isArray(container.data)) {
+        const data = container.data.map((item) => {
+          const patched = cloneCuratedPluginForDisplay(item);
+          if (patched !== item) containerChanged = true;
+          return patched;
+        });
+        next.data = data;
+      }
+      if (containerChanged) changed = true;
+      return containerChanged ? next : container;
+    };
+    let patched = Array.isArray(result) ? result.map((item) => patchContainer(item)) : patchContainer(result);
+    if (patched?.result && typeof patched.result === "object") {
+      const nextResult = patchPluginListResult(patched.result);
+      if (nextResult !== patched.result) {
+        patched = { ...patched, result: nextResult };
+        changed = true;
+      }
+    }
+    if (patched?.data && typeof patched.data === "object" && !Array.isArray(patched.data)) {
+      const nextData = patchPluginListResult(patched.data);
+      if (nextData !== patched.data) {
+        patched = { ...patched, data: nextData };
+        changed = true;
+      }
+    }
+    return changed ? patched : result;
+  }
+
+  function patchPluginListResponseData(data) {
+    if (data?.type !== "mcp-response") return false;
+    const message = data.message || data.response;
+    const requestId = message?.id != null ? String(message.id) : "";
+    if (codexMatePluginListRequestIds.size > 0 && requestId && !codexMatePluginListRequestIds.has(requestId)) return false;
+    const patched = patchPluginListResult(message?.result);
+    if (patched === message?.result) return false;
+    if (requestId) codexMatePluginListRequestIds.delete(requestId);
+    message.result = patched;
+    return true;
+  }
+
+  function patchAppServerPluginRequestClient(client) {
+    if (!client || typeof client.sendRequest !== "function") return false;
+    installCodexMateVersionGuard(client, "__codexMatePluginListPatch");
+    if (client.__codexMatePluginListPatch === codexMatePluginListPatchVersion) return true;
+    const originalSendRequest = client.__codexMatePluginListOriginalSendRequest || client.sendRequest.bind(client);
+    client.__codexMatePluginListOriginalSendRequest = originalSendRequest;
+    client.sendRequest = async function codexMatePluginListPatchedSendRequest(method, params, options) {
+      rememberPluginRequest(method, params);
+      if (!codexMateSettings().pluginEntryUnlock || !isPluginListRequest(method, params)) return await originalSendRequest(method, params, options);
+      const patchedParams = patchPluginListRequestParams(params);
+      rememberPluginRequest(method, params, patchedParams);
+      const result = await originalSendRequest(method, patchedParams, options);
+      return patchPluginListResult(result);
+    };
+    client.__codexMatePluginListPatch = codexMatePluginListPatchVersion;
+    return true;
+  }
+
+  function installPluginListMessagePatch() {
+    if (window.__codexMatePluginListMessagePatch === codexMatePluginListPatchVersion) return;
+    const originalDispatchEvent = window.__codexMatePluginListOriginalDispatchEvent || window.dispatchEvent;
+    window.__codexMatePluginListOriginalDispatchEvent = originalDispatchEvent;
+    window.dispatchEvent = function codexMatePluginListPatchedDispatchEvent(event) {
+      try {
+        const detail = event?.detail;
+        const request = detail?.request;
+        if (codexMateSettings().pluginEntryUnlock && event?.type === "codex-message-from-view" && detail?.type === "mcp-request" && isPluginListRequest(request?.method, request?.params)) {
+          if (request?.id != null) codexMatePluginListRequestIds.add(String(request.id));
+        }
+        if (event?.type === "message") patchPluginListResponseData(event.data);
+      } catch (error) {
+        window.__codexMatePluginListPatchFailures = window.__codexMatePluginListPatchFailures || [];
+        window.__codexMatePluginListPatchFailures.push(String(error?.stack || error));
+      }
+      return originalDispatchEvent.call(this, event);
+    };
+    window.addEventListener("message", (event) => {
+      try {
+        patchPluginListResponseData(event?.data);
+      } catch (error) {
+        window.__codexMatePluginListPatchFailures = window.__codexMatePluginListPatchFailures || [];
+        window.__codexMatePluginListPatchFailures.push(String(error?.stack || error));
+      }
+    }, true);
+    window.__codexMatePluginListMessagePatch = codexMatePluginListPatchVersion;
+  }
+
+  function installPluginListMarketplacePatch() {
+    if (!codexMateSettings().pluginEntryUnlock) return;
+    installPluginListMessagePatch();
+    if (window.__codexMatePluginListRequestPatch === codexMatePluginListPatchVersion) return;
+    const patch = async () => {
+      try {
+        const module = await loadCodexAppModule("app-server-manager-signals-");
+        const candidates = Object.values(module).filter((value) => value && typeof value === "object");
+        let patchedCount = 0;
+        for (const candidate of candidates) {
+          if (patchAppServerPluginRequestClient(candidate)) patchedCount += 1;
+          if (typeof candidate.sendRequest !== "function" && typeof candidate.get === "function") {
+            try {
+              if (patchAppServerPluginRequestClient(candidate.get())) patchedCount += 1;
+            } catch {
+            }
+          }
+        }
+        if (patchedCount > 0) {
+          window.__codexMatePluginListRequestPatch = codexMatePluginListPatchVersion;
+        }
+      } catch (error) {
+        window.__codexMatePluginListPatchFailures = window.__codexMatePluginListPatchFailures || [];
+        window.__codexMatePluginListPatchFailures.push(String(error?.stack || error));
+      }
+    };
+    void patch();
   }
 
   function pluginInstallCandidates() {
@@ -2052,18 +2913,33 @@
   }
 
   async function postJson(path, payload) {
+    if (Date.now() < Number(window.__codexMateBridgeDisabledUntil || 0)) {
+      return await httpPostJson(path, payload);
+    }
     if (!window.__codexMateBridge) {
       return await httpPostJson(path, payload);
     }
+    let bridgeFailure = null;
     try {
       const result = await withTimeout(window.__codexMateBridge(path, payload), bridgeFallbackTimeoutMs(path), "Codex Mate bridge timeout");
-      if (result?.status !== "failed" || !/Unknown bridge path|bridge timeout/i.test(String(result?.message || ""))) {
+      if (result?.status !== "failed" || !/Unknown bridge path|bridge timeout|bridge binding unavailable|后端未连接/i.test(String(result?.message || ""))) {
         return result;
       }
-    } catch (_) {
+      bridgeFailure = result;
+    } catch (error) {
+      bridgeFailure = { status: "failed", message: error?.message || "Codex Mate bridge timeout" };
+      window.__codexMateBridgeDisabledUntil = Date.now() + 10000;
       // Fall through to the HTTP helper when the in-page bridge is stale or wedged.
     }
-    return await httpPostJson(path, payload);
+    const httpResult = await httpPostJson(path, payload);
+    if (
+      bridgeFailure
+      && httpResult?.status === "failed"
+      && /Codex Mate 后端未连接|未连接/i.test(String(httpResult?.message || ""))
+    ) {
+      return bridgeFailure;
+    }
+    return httpResult;
   }
 
   function downloadMarkdown(filename, markdown) {
@@ -3851,10 +4727,14 @@
     document.querySelectorAll(`.${timelineMarkerClass}.codex-conversation-timeline-marker-active`).forEach((node) => {
       node.classList.remove("codex-conversation-timeline-marker-active");
     });
+    document.querySelectorAll(`.${timelineItemClass}.codex-conversation-timeline-item-active`).forEach((node) => {
+      node.classList.remove("codex-conversation-timeline-item-active");
+    });
     if (!itemId) return;
     const escapedItemId = window.CSS?.escape ? CSS.escape(String(itemId)) : String(itemId).replace(/["\\]/g, "\\$&");
     document.querySelectorAll(`[data-timeline-item-id="${escapedItemId}"]`).forEach((node) => {
       if (node.classList.contains(timelineMarkerClass)) node.classList.add("codex-conversation-timeline-marker-active");
+      if (node.classList.contains(timelineItemClass)) node.classList.add("codex-conversation-timeline-item-active");
     });
   }
 
@@ -3897,33 +4777,49 @@
     if (!scroller) return false;
     const calibratedPercent = options.calibrated ? calibratedTimelineTargetPercent(item, scroller) : null;
     const targetTop = timelineTargetScrollTop(scroller, calibratedPercent ?? timelineItemReferencePercent(item));
+    const behavior = options.behavior || "auto";
     markTimelineProgrammaticScroll();
     if (typeof scroller.scrollTo === "function") {
-      scroller.scrollTo({ top: targetTop, behavior: "smooth" });
+      scroller.scrollTo({ top: targetTop, behavior });
     } else {
       scroller.scrollTop = targetTop;
     }
     return true;
   }
 
+  function clearConversationTimelineRetryTimers() {
+    (window.__codexConversationTimelineRetryTimers || []).forEach((timer) => clearTimeout(timer));
+    window.__codexConversationTimelineRetryTimers = [];
+  }
+
+  function scheduleConversationTimelineRetry(item, attempt, delay) {
+    const timer = setTimeout(() => {
+      window.__codexConversationTimelineRetryTimers = (window.__codexConversationTimelineRetryTimers || []).filter((entry) => entry !== timer);
+      retryResolveTimelineTarget(item, attempt);
+    }, delay);
+    window.__codexConversationTimelineRetryTimers = [...(window.__codexConversationTimelineRetryTimers || []), timer];
+  }
+
   function retryResolveTimelineTarget(item, attempt = 0) {
     const target = findMountedTimelineTarget(item, { allowAmbiguous: true });
     if (target) {
+      clearConversationTimelineRetryTimers();
       scrollTimelineTarget(target);
       highlightTimelineTarget(target);
       return true;
     }
-    if (attempt < 4) approximateScrollTimelineTarget(item, { calibrated: true });
-    const delays = [180, 360, 700, 1100, 1600];
+    if (attempt < 6) approximateScrollTimelineTarget(item, { calibrated: true, behavior: "auto" });
+    const delays = [120, 240, 420, 700, 1050, 1450, 1900, 2500];
     if (attempt >= delays.length) {
       showToast("已滚动到附近，页面继续加载后可再次点击", null);
       return false;
     }
-    setTimeout(() => retryResolveTimelineTarget(item, attempt + 1), delays[attempt]);
+    scheduleConversationTimelineRetry(item, attempt + 1, delays[attempt]);
     return false;
   }
 
   function activateConversationTimelineItem(item) {
+    clearConversationTimelineRetryTimers();
     setActiveConversationTimelineItem(item?.id);
     const target = findMountedTimelineTarget(item, { allowAmbiguous: false });
     if (target) {
@@ -3931,11 +4827,61 @@
       highlightTimelineTarget(target);
       return;
     }
-    if (!approximateScrollTimelineTarget(item)) {
+    if (!approximateScrollTimelineTarget(item, { calibrated: true, behavior: "auto" })) {
       showToast("当前没有可滚动的对话区域", null);
       return;
     }
-    retryResolveTimelineTarget(item);
+    scheduleConversationTimelineRetry(item, 0, 80);
+  }
+
+  function setConversationTimelinePanelOpen(root, open) {
+    if (!root) return;
+    root.dataset.panelOpen = open ? "true" : "false";
+    const toggle = root.querySelector(`.${timelineToggleClass}`);
+    if (toggle) toggle.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+
+  function createConversationTimelineToggle(root, visibleCount, totalCount) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = timelineToggleClass;
+    button.textContent = "目录";
+    button.setAttribute("aria-label", `打开对话目录，当前显示 ${visibleCount} / ${totalCount} 条`);
+    button.setAttribute("aria-expanded", "false");
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setConversationTimelinePanelOpen(root, root.dataset.panelOpen !== "true");
+    }, true);
+    return button;
+  }
+
+  function createConversationTimelineItem(item, displayIndex, root) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = timelineItemClass;
+    button.dataset.timelineItemId = String(item.id || item.nodeId || "");
+    const previewText = truncateTimelineQuestion(item.preview || item.text || "空消息");
+    button.setAttribute("aria-label", `跳转到：${previewText}`);
+    const index = document.createElement("strong");
+    index.textContent = `#${displayIndex + 1}`;
+    const label = document.createElement("span");
+    label.textContent = previewText;
+    button.append(index, label);
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      activateConversationTimelineItem(item);
+      setConversationTimelinePanelOpen(root, false);
+    }, true);
+    button.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        activateConversationTimelineItem(item);
+        setConversationTimelinePanelOpen(root, false);
+      }
+    }, true);
+    return button;
   }
 
   function renderConversationTimelinePayload(payload, ref) {
@@ -3966,18 +4912,15 @@
     root.dataset.codexConversationTimelineVersion = codexConversationTimelineVersion;
     root.dataset.sessionId = key;
     root.dataset.renderSignature = signature;
-    const track = document.createElement("div");
-    track.className = timelineTrackClass;
-    root.appendChild(track);
-
-    const tops = timelineMarkerTopsFromItems(visibleItems);
+    root.dataset.panelOpen = "false";
+    const toggle = createConversationTimelineToggle(root, visibleItems.length, items.length);
+    root.appendChild(toggle);
+    const panel = document.createElement("div");
+    panel.className = timelinePanelClass;
+    panel.setAttribute("role", "menu");
+    root.appendChild(panel);
     visibleItems.forEach((item, index) => {
-      const marker = createConversationTimelineMarker({
-        ...item,
-        markerTop: Number(tops[index].toFixed(3)),
-        preview: item.preview || item.text || "空消息",
-      });
-      root.appendChild(marker);
+      panel.appendChild(createConversationTimelineItem(item, index, root));
     });
     document.body.appendChild(root);
   }
@@ -4307,7 +5250,7 @@
   function scanLightweight() {
     removeStaleConversationTimeline();
     installStyle();
-    installChromePluginGateOverride();
+    refreshPluginRuntimeUnlock();
     installCodexMateMenu();
     installDeleteButtonEventDelegation();
     installThreadScrollNavigationCapture();
@@ -4398,4 +5341,5 @@
   window.__codexMateObserver?.disconnect();
   window.__codexMateObserver = new MutationObserver(scheduleScan);
   window.__codexMateObserver.observe(document.body || document.documentElement, { childList: true, subtree: true });
+  window.__codexMateScriptCompletedVersion = codexMatePluginListPatchVersion;
 })();

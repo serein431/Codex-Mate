@@ -194,6 +194,27 @@ def project_root() -> Path:
     return runtime.app_root(__file__)
 
 
+def _path_is_relative_to(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve().relative_to(parent.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def macos_launch_agent_python_executable(project: Path | None = None) -> Path:
+    executable = Path(sys.executable)
+    root = project or project_root()
+    if runtime.is_frozen() or _path_is_relative_to(executable, root):
+        return executable
+    if any(part in {".venv", "venv"} for part in executable.parts):
+        base_prefix = Path(getattr(sys, "base_prefix", sys.prefix))
+        base_python = base_prefix / "bin" / "python3"
+        if base_python.exists():
+            return base_python
+    return executable
+
+
 def build_macos_launch_agent_plist(python_executable: Path, debug_port: int, working_directory: Path | None = None) -> dict[str, object]:
     out_log = data_root() / "watcher.launchd.log"
     err_log = data_root() / "watcher.launchd.err"
@@ -214,7 +235,7 @@ def write_macos_launch_agent(debug_port: int) -> Path:
     path = macos_launch_agent_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     data_root().mkdir(parents=True, exist_ok=True)
-    plist = build_macos_launch_agent_plist(Path(sys.executable), debug_port)
+    plist = build_macos_launch_agent_plist(macos_launch_agent_python_executable(), debug_port)
     path.write_bytes(plistlib.dumps(plist))
     return path
 

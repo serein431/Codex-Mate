@@ -29,6 +29,12 @@ class FakeProcess:
         self.waited = True
 
 
+@pytest.fixture(autouse=True)
+def stub_launch_plugin_marketplace_repairs(monkeypatch):
+    monkeypatch.setattr(launcher.native_features, "ensure_bundled_plugin_marketplace_cache", lambda **kwargs: {"status": "skipped"})
+    monkeypatch.setattr(launcher.native_features, "ensure_curated_plugin_marketplace_registered", lambda **kwargs: {"status": "skipped"})
+
+
 def test_launch_codex_windows_adds_remote_debugging_port(monkeypatch):
     app_dir = Path("C:/Codex/app")
     popen_calls = []
@@ -399,21 +405,26 @@ def test_launch_codex_windows_allows_devtools_websocket_origin(monkeypatch):
 def test_launch_codex_macos_uses_open_command(monkeypatch, tmp_path):
     app = tmp_path / "Codex.app"
     (app / "Contents" / "MacOS").mkdir(parents=True)
-    run_calls = []
-    monkeypatch.setattr(launcher.subprocess, "run", lambda args, **kw: run_calls.append(args))
+    popen_calls = []
+    monkeypatch.setattr(launcher, "prepare_macos_codex_relaunch", lambda debug_port: None)
+    monkeypatch.setattr(launcher.subprocess, "Popen", lambda args, **kw: popen_calls.append((args, kw)) or FakeProcess())
 
     proc = launch_codex_app(app, 9229)
 
-    assert proc is None
-    open_calls = [call for call in run_calls if call and call[0] == "open"]
+    assert isinstance(proc, FakeProcess)
+    open_calls = [call for call, _kwargs in popen_calls if call and call[0] == "open"]
     assert len(open_calls) == 1
     assert open_calls[0] == [
         "open",
+        "-W",
+        "-a",
         str(app),
         "--args",
         "--remote-debugging-port=9229",
         "--remote-allow-origins=http://127.0.0.1:9229",
     ]
+    assert popen_calls[0][1]["stdout"] == launcher.subprocess.DEVNULL
+    assert popen_calls[0][1]["stderr"] == launcher.subprocess.DEVNULL
 
 
 def test_launcher_macos_process_scan_ignores_codex_manager(monkeypatch):
@@ -461,7 +472,7 @@ def test_launch_codex_macos_prepares_relaunch_before_open(monkeypatch, tmp_path)
     events = []
     monkeypatch.setattr(launcher.sys, "platform", "darwin")
     monkeypatch.setattr(launcher, "prepare_macos_codex_relaunch", lambda debug_port: events.append(("prepare", debug_port)))
-    monkeypatch.setattr(launcher.subprocess, "run", lambda args, **kw: events.append(("open", args)))
+    monkeypatch.setattr(launcher.subprocess, "Popen", lambda args, **kw: events.append(("open", args)) or FakeProcess())
 
     launch_codex_app(app, 9229)
 
@@ -735,9 +746,10 @@ def test_launch_uses_resolved_app_dir(monkeypatch, tmp_path):
     executable.write_text("#!/bin/sh\n", encoding="utf-8")
     monkeypatch.setattr(launcher, "resolve_codex_app_dir", lambda app_dir=None: mac_app)
     monkeypatch.setattr(launcher, "prepare_windows_codex_relaunch", lambda debug_port: None)
+    monkeypatch.setattr(launcher, "prepare_macos_codex_relaunch", lambda debug_port: None)
     monkeypatch.setattr(launcher, "cdp_port_ready", lambda debug_port: False)
     monkeypatch.setattr(launcher, "start_helper", lambda *args, **kwargs: FakeServer())
-    monkeypatch.setattr(launcher.subprocess, "run", lambda args, **kw: launched.append(args))
+    monkeypatch.setattr(launcher.subprocess, "Popen", lambda args, **kw: launched.append(args) or FakeProcess())
     monkeypatch.setattr(launcher, "inject_with_retry", lambda *args, **kwargs: {"result": {}})
 
     launcher.launch_and_inject(None, None, tmp_path / "backups", 9229, 57321)
@@ -745,6 +757,32 @@ def test_launch_uses_resolved_app_dir(monkeypatch, tmp_path):
     open_calls = [call for call in launched if call and call[0] == "open"]
     assert len(open_calls) == 1
     assert str(executable) not in open_calls[0]
+
+
+def test_launch_repairs_plugin_marketplaces(monkeypatch, tmp_path):
+    bundled_calls = []
+    curated_calls = []
+    app = tmp_path / "Codex.app"
+    monkeypatch.setattr(launcher, "resolve_codex_app_dir", lambda app_dir=None: app)
+    monkeypatch.setattr(launcher, "prepare_windows_codex_relaunch", lambda debug_port: None)
+    monkeypatch.setattr(launcher, "cdp_port_ready", lambda debug_port: True)
+    monkeypatch.setattr(launcher, "start_helper", lambda *args, **kwargs: FakeServer())
+    monkeypatch.setattr(launcher, "inject_with_retry", lambda *args, **kwargs: {"result": {}})
+    monkeypatch.setattr(
+        launcher.native_features,
+        "ensure_bundled_plugin_marketplace_cache",
+        lambda **kwargs: bundled_calls.append(kwargs) or {"status": "skipped"},
+    )
+    monkeypatch.setattr(
+        launcher.native_features,
+        "ensure_curated_plugin_marketplace_registered",
+        lambda **kwargs: curated_calls.append(kwargs) or {"status": "skipped"},
+    )
+
+    launcher.launch_and_inject(None, None, tmp_path / "backups", 9229, 57321)
+
+    assert bundled_calls == [{"app_dir": app}]
+    assert curated_calls == [{}]
 
 
 def test_launch_and_inject_attaches_without_reopening_when_cdp_is_already_ready(monkeypatch, tmp_path):
@@ -761,6 +799,41 @@ def test_launch_and_inject_attaches_without_reopening_when_cdp_is_already_ready(
     assert server.port == 57321
     assert proc is None
     assert launched == []
+
+
+def test_launch_and_inject_restarts_running_codex_when_curated_marketplace_registration_changes(monkeypatch, tmp_path):
+    launched = []
+    prepare_calls = []
+    monkeypatch.setattr(launcher.sys, "platform", "darwin")
+    monkeypatch.setattr(launcher, "resolve_codex_app_dir", lambda app_dir=None: tmp_path)
+    monkeypatch.setattr(launcher, "prepare_windows_codex_relaunch", lambda debug_port: None)
+    monkeypatch.setattr(
+        launcher,
+        "prepare_macos_codex_relaunch",
+        lambda debug_port, *, force_restart=False: prepare_calls.append((debug_port, force_restart)),
+    )
+    states = iter([True, False])
+    monkeypatch.setattr(launcher, "cdp_port_ready", lambda debug_port: next(states))
+    monkeypatch.setattr(launcher, "start_helper", lambda *args, **kwargs: FakeServer())
+    monkeypatch.setattr(launcher, "launch_codex_app", lambda *args: launched.append(args) or 1234)
+    monkeypatch.setattr(launcher, "inject_with_retry", lambda *args, **kwargs: {"result": {}})
+    monkeypatch.setattr(
+        launcher.native_features,
+        "ensure_bundled_plugin_marketplace_cache",
+        lambda **kwargs: {"status": "skipped"},
+    )
+    monkeypatch.setattr(
+        launcher.native_features,
+        "ensure_curated_plugin_marketplace_registered",
+        lambda **kwargs: {"status": "updated"},
+    )
+
+    server, proc = launcher.launch_and_inject(None, None, tmp_path / "backups", 9229, 57321)
+
+    assert server.port == 57321
+    assert proc == 1234
+    assert prepare_calls == [(9229, True)]
+    assert len(launched) == 1
 
 
 def test_cli_stops_existing_windows_launchers_before_launch(monkeypatch):

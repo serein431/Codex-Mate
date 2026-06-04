@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import tomllib
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 import re
 from typing import Any
@@ -40,6 +41,10 @@ AUTH_ENHANCEMENT_MODE_ALIASES = {
     "patch": "forceInject",
     "pure-api": "forceInject",
 }
+CURATED_PLUGIN_SOURCE_MARKETPLACE_NAME = "openai-curated"
+CURATED_PLUGIN_MARKETPLACE_NAME = "openai-curated"
+CURATED_PLUGIN_MANAGED_ALIAS_MARKETPLACE_NAME = "openai-bundled"
+LEGACY_CURATED_PLUGIN_MARKETPLACE_NAMES = ("openai-curated", "openai-curated-remote")
 
 
 def default_codex_home() -> Path:
@@ -74,6 +79,356 @@ def read_json_object(path: Path) -> dict[str, Any] | None:
     except (OSError, json.JSONDecodeError):
         return None
     return data if isinstance(data, dict) else None
+
+
+def codex_resources_dir(app_dir: str | Path | None) -> Path | None:
+    if app_dir is None:
+        return None
+    root = Path(app_dir).expanduser()
+    candidates = [
+        root / "Contents" / "Resources",
+        root / "resources",
+        root / "Resources",
+        root,
+    ]
+    return next((path for path in candidates if (path / "plugins" / "openai-bundled" / ".agents" / "plugins" / "marketplace.json").exists()), None)
+
+
+def bundled_plugin_marketplace_path(root: Path) -> Path:
+    return root / ".agents" / "plugins" / "marketplace.json"
+
+
+def bundled_plugin_signature(marketplace_root: Path) -> dict[str, str]:
+    manifest = read_json_object(bundled_plugin_marketplace_path(marketplace_root)) or {}
+    plugins = manifest.get("plugins")
+    signature: dict[str, str] = {}
+    if not isinstance(plugins, list):
+        return signature
+    for item in plugins:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        plugin_json = marketplace_root / "plugins" / name / ".codex-plugin" / "plugin.json"
+        plugin_manifest = read_json_object(plugin_json) or {}
+        version = str(plugin_manifest.get("version") or "")
+        signature[name] = version
+    return dict(sorted(signature.items()))
+
+
+def bundled_plugin_cache_path(codex_home: str | Path | None = None, marketplace_name: str = "openai-bundled") -> Path:
+    home = Path(codex_home).expanduser() if codex_home is not None else default_codex_home()
+    return home / ".tmp" / "bundled-marketplaces" / marketplace_name
+
+
+def curated_plugin_marketplace_root(codex_home: str | Path | None = None) -> Path:
+    home = Path(codex_home).expanduser() if codex_home is not None else default_codex_home()
+    return home / ".tmp" / "plugins"
+
+
+def curated_plugin_marketplace_alias_root(
+    codex_home: str | Path | None = None,
+    *,
+    marketplace_name: str = CURATED_PLUGIN_MARKETPLACE_NAME,
+) -> Path:
+    home = Path(codex_home).expanduser() if codex_home is not None else default_codex_home()
+    return home / ".tmp" / "codex-mate-marketplaces" / marketplace_name
+
+
+def curated_plugin_marketplace_path(marketplace_root: Path) -> Path:
+    return marketplace_root / ".agents" / "plugins" / "marketplace.json"
+
+
+def curated_plugin_alias_manifest(source_root: Path, alias_root: Path, marketplace_name: str) -> dict[str, Any] | None:
+    source_manifest = read_json_object(curated_plugin_marketplace_path(source_root))
+    if not isinstance(source_manifest, dict):
+        return None
+    plugins = source_manifest.get("plugins")
+    if not isinstance(plugins, list):
+        return None
+
+    alias_plugins: list[object] = []
+    for item in plugins:
+        if not isinstance(item, dict):
+            alias_plugins.append(item)
+            continue
+        source = item.get("source")
+        if not isinstance(source, dict):
+            alias_plugins.append(item)
+            continue
+        rel_path = source.get("path")
+        if not isinstance(rel_path, str) or not rel_path.strip():
+            alias_plugins.append(item)
+            continue
+        plugin_root = (source_root / rel_path).resolve()
+        alias_path = os.path.relpath(plugin_root, alias_root).replace("\\", "/")
+        if not alias_path.startswith("."):
+            alias_path = f"./{alias_path}"
+        alias_plugins.append({**item, "source": {**source, "path": alias_path}})
+
+    source_interface = source_manifest.get("interface")
+    interface = dict(source_interface) if isinstance(source_interface, dict) else {}
+    interface.setdefault("version", 1)
+    interface["displayName"] = "OpenAI Bundled"
+    return {
+        **source_manifest,
+        "name": marketplace_name,
+        "interface": interface,
+        "plugins": alias_plugins,
+    }
+
+
+def curated_plugin_marketplace_alias_status(
+    codex_home: str | Path | None = None,
+    *,
+    marketplace_name: str = CURATED_PLUGIN_MARKETPLACE_NAME,
+) -> dict[str, object]:
+    source_root = curated_plugin_marketplace_root(codex_home)
+    alias_root = curated_plugin_marketplace_alias_root(codex_home, marketplace_name=marketplace_name)
+    alias_manifest_path = curated_plugin_marketplace_path(alias_root)
+    expected = curated_plugin_alias_manifest(source_root, alias_root, marketplace_name)
+    current = read_json_object(alias_manifest_path)
+    ready = expected is not None and current == expected
+    return {
+        "ready": ready,
+        "source_path": str(source_root),
+        "alias_path": str(alias_root),
+        "alias_manifest_path": str(alias_manifest_path),
+        "reason": "curated plugin marketplace alias is current" if ready else "curated plugin marketplace alias missing or stale",
+    }
+
+
+def ensure_curated_plugin_marketplace_alias(
+    codex_home: str | Path | None = None,
+    *,
+    marketplace_name: str = CURATED_PLUGIN_MARKETPLACE_NAME,
+) -> dict[str, object]:
+    source_root = curated_plugin_marketplace_root(codex_home)
+    alias_root = curated_plugin_marketplace_alias_root(codex_home, marketplace_name=marketplace_name)
+    alias_manifest_path = curated_plugin_marketplace_path(alias_root)
+    expected = curated_plugin_alias_manifest(source_root, alias_root, marketplace_name)
+    if expected is None:
+        status = curated_plugin_marketplace_alias_status(codex_home, marketplace_name=marketplace_name)
+        return {"status": "skipped", **status}
+    current = read_json_object(alias_manifest_path)
+    if current == expected:
+        status = curated_plugin_marketplace_alias_status(codex_home, marketplace_name=marketplace_name)
+        return {"status": "skipped", **status}
+    alias_manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    alias_manifest_path.write_text(json.dumps(expected, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    status = curated_plugin_marketplace_alias_status(codex_home, marketplace_name=marketplace_name)
+    return {"status": "updated", **status}
+
+
+def curated_plugin_marketplace_status(
+    codex_home: str | Path | None = None,
+    *,
+    marketplace_name: str = CURATED_PLUGIN_MARKETPLACE_NAME,
+) -> dict[str, object]:
+    root = curated_plugin_marketplace_root(codex_home)
+    manifest_path = curated_plugin_marketplace_path(root)
+    config_path = config_path_for(codex_home)
+    manifest = read_json_object(manifest_path)
+    plugins = manifest.get("plugins") if isinstance(manifest, dict) else None
+    plugin_count = len(plugins) if isinstance(plugins, list) else 0
+    invalid_plugins = curated_marketplace_invalid_plugins(root, plugins if isinstance(plugins, list) else [])
+    config = read_config(config_path)
+    marketplace_config = marketplace_config_for(config, marketplace_name)
+    registered = marketplace_config_source_matches(marketplace_config, root)
+    managed_alias_path = curated_plugin_marketplace_alias_root(
+        codex_home,
+        marketplace_name=CURATED_PLUGIN_MANAGED_ALIAS_MARKETPLACE_NAME,
+    )
+    managed_alias_config = marketplace_config_for(config, CURATED_PLUGIN_MANAGED_ALIAS_MARKETPLACE_NAME)
+    managed_alias_registered = marketplace_config_source_matches(managed_alias_config, managed_alias_path)
+    source_present = (
+        isinstance(manifest, dict)
+        and isinstance(manifest.get("name"), str)
+        and isinstance(plugins, list)
+        and plugin_count > 0
+        and not invalid_plugins
+    )
+    reasons: list[str] = []
+    if manifest is None:
+        reasons.append("curated plugin marketplace not found")
+    elif not isinstance(plugins, list) or plugin_count == 0:
+        reasons.append("curated plugin marketplace has no plugins")
+    if invalid_plugins:
+        reasons.append("curated plugin marketplace contains invalid plugin paths")
+    if config is None:
+        reasons.append("config.toml missing or unreadable")
+    elif not registered:
+        reasons.append("curated plugin marketplace not registered in config.toml")
+    if managed_alias_registered:
+        reasons.append("managed bundled marketplace alias should be removed")
+    ready = source_present and registered and not managed_alias_registered
+    return {
+        "ready": ready,
+        "reason": "curated plugin marketplace is registered" if ready else "; ".join(reasons),
+        "marketplace_name": marketplace_name,
+        "source_ready": source_present,
+        "source_path": str(root),
+        "alias_ready": False,
+        "alias_path": "",
+        "alias_manifest_path": "",
+        "manifest_path": str(manifest_path),
+        "config_path": str(config_path),
+        "plugin_count": plugin_count,
+        "invalid_plugins": invalid_plugins,
+        "registered": registered,
+        "managed_alias_registered": managed_alias_registered,
+    }
+
+
+def ensure_curated_plugin_marketplace_registered(
+    codex_home: str | Path | None = None,
+    *,
+    marketplace_name: str = CURATED_PLUGIN_MARKETPLACE_NAME,
+) -> dict[str, object]:
+    status = curated_plugin_marketplace_status(codex_home, marketplace_name=marketplace_name)
+    if status.get("ready") is True:
+        return {"status": "skipped", **status}
+    if status.get("source_ready") is not True:
+        return {"status": "skipped", **status}
+    config_path = Path(str(status["config_path"]))
+    if not config_path.exists() or read_config(config_path) is None:
+        return {"status": "skipped", **status}
+    text = config_path.read_text(encoding="utf-8")
+    updated = set_local_marketplace_in_toml(
+        text,
+        marketplace_name=marketplace_name,
+        source_path=str(status["source_path"]),
+    )
+    config = read_config(config_path)
+    if isinstance(config, dict):
+        for legacy_name in LEGACY_CURATED_PLUGIN_MARKETPLACE_NAMES:
+            if legacy_name == marketplace_name:
+                continue
+            legacy_config = marketplace_config_for(config, legacy_name)
+            if marketplace_config_source_matches(legacy_config, Path(str(status["source_path"]))):
+                updated = remove_toml_table(updated, f"marketplaces.{legacy_name}")
+        managed_alias_config = marketplace_config_for(config, CURATED_PLUGIN_MANAGED_ALIAS_MARKETPLACE_NAME)
+        managed_alias_path = curated_plugin_marketplace_alias_root(
+            codex_home,
+            marketplace_name=CURATED_PLUGIN_MANAGED_ALIAS_MARKETPLACE_NAME,
+        )
+        if marketplace_config_source_matches(managed_alias_config, managed_alias_path):
+            updated = remove_toml_table(updated, f"marketplaces.{CURATED_PLUGIN_MANAGED_ALIAS_MARKETPLACE_NAME}")
+    if updated == text:
+        refreshed = curated_plugin_marketplace_status(codex_home, marketplace_name=marketplace_name)
+        return {"status": "skipped", **refreshed}
+    backup_path = backup_config(config_path, f"marketplace-{marketplace_name}")
+    config_path.write_text(updated, encoding="utf-8")
+    refreshed = curated_plugin_marketplace_status(codex_home, marketplace_name=marketplace_name)
+    return {
+        "status": "updated",
+        "backup_path": str(backup_path),
+        **refreshed,
+    }
+
+
+def curated_marketplace_invalid_plugins(marketplace_root: Path, plugins: list[object]) -> list[str]:
+    invalid: list[str] = []
+    for item in plugins:
+        if not isinstance(item, dict):
+            invalid.append("<invalid>")
+            continue
+        name = str(item.get("name") or "").strip()
+        source = item.get("source")
+        rel_path = source.get("path") if isinstance(source, dict) else None
+        if not name or not isinstance(rel_path, str) or not rel_path.strip():
+            invalid.append(name or "<unnamed>")
+            continue
+        plugin_json = marketplace_root / rel_path / ".codex-plugin" / "plugin.json"
+        if not plugin_json.exists():
+            invalid.append(name)
+    return invalid
+
+
+def marketplace_config_for(config: dict[str, Any] | None, marketplace_name: str) -> dict[str, Any] | None:
+    if not isinstance(config, dict):
+        return None
+    marketplaces = config.get("marketplaces")
+    if not isinstance(marketplaces, dict):
+        return None
+    marketplace = marketplaces.get(marketplace_name)
+    return marketplace if isinstance(marketplace, dict) else None
+
+
+def marketplace_config_source_matches(marketplace: dict[str, Any] | None, source_root: Path) -> bool:
+    if not isinstance(marketplace, dict):
+        return False
+    source = marketplace.get("source")
+    if marketplace.get("source_type") != "local" or not isinstance(source, str):
+        return False
+    try:
+        return Path(source).expanduser() == source_root.expanduser()
+    except (OSError, RuntimeError):
+        return False
+
+
+def bundled_plugin_marketplace_cache_status(
+    codex_home: str | Path | None = None,
+    *,
+    app_dir: str | Path | None = None,
+    marketplace_name: str = "openai-bundled",
+) -> dict[str, object]:
+    resources_dir = codex_resources_dir(app_dir)
+    if resources_dir is None:
+        return {
+            "ready": False,
+            "reason": "codex bundled plugin marketplace not found",
+            "source_path": "",
+            "cache_path": str(bundled_plugin_cache_path(codex_home, marketplace_name)),
+            "source_plugins": {},
+            "cache_plugins": {},
+            "missing_plugins": [],
+        }
+    source_root = resources_dir / "plugins" / marketplace_name
+    cache_root = bundled_plugin_cache_path(codex_home, marketplace_name)
+    source_signature = bundled_plugin_signature(source_root)
+    cache_signature = bundled_plugin_signature(cache_root)
+    missing_plugins = sorted(name for name in source_signature if name not in cache_signature)
+    changed_plugins = sorted(
+        name
+        for name, version in source_signature.items()
+        if cache_signature.get(name) not in (version, None)
+    )
+    return {
+        "ready": source_signature == cache_signature,
+        "reason": "bundled plugin cache is current" if source_signature == cache_signature else "bundled plugin cache differs from Codex app",
+        "source_path": str(source_root),
+        "cache_path": str(cache_root),
+        "source_plugins": source_signature,
+        "cache_plugins": cache_signature,
+        "missing_plugins": missing_plugins,
+        "changed_plugins": changed_plugins,
+    }
+
+
+def ensure_bundled_plugin_marketplace_cache(
+    codex_home: str | Path | None = None,
+    *,
+    app_dir: str | Path | None = None,
+    marketplace_name: str = "openai-bundled",
+) -> dict[str, object]:
+    status = bundled_plugin_marketplace_cache_status(codex_home, app_dir=app_dir, marketplace_name=marketplace_name)
+    if not status.get("source_path"):
+        return {"status": "skipped", **status}
+    if status.get("ready") is True:
+        return {"status": "skipped", **status}
+    source_root = Path(str(status["source_path"]))
+    cache_root = Path(str(status["cache_path"]))
+    staging_root = cache_root.with_name(f"{cache_root.name}.staging")
+    cache_root.parent.mkdir(parents=True, exist_ok=True)
+    shutil.rmtree(staging_root, ignore_errors=True)
+    shutil.copytree(source_root, staging_root)
+    if cache_root.exists():
+        shutil.rmtree(cache_root)
+    staging_root.rename(cache_root)
+    updated = bundled_plugin_marketplace_cache_status(codex_home, app_dir=app_dir, marketplace_name=marketplace_name)
+    return {"status": "updated", **updated}
 
 
 def remote_feature_status(codex_home: str | Path | None = None) -> dict[str, object]:
@@ -149,13 +504,7 @@ def ensure_login_preserving_provider(
     config_path = config_path_for(codex_home)
     auth_path = config_path.parent / "auth.json"
     auth = read_json_object(auth_path)
-    if not chatgpt_auth_has_login_token(auth):
-        return {
-            "status": "skipped",
-            "reason": "chatgpt login token not found",
-            "config_path": str(config_path),
-            "auth_path": str(auth_path),
-        }
+    login_ready = chatgpt_auth_has_login_token(auth)
 
     config = read_config(config_path)
     if config is None:
@@ -224,13 +573,15 @@ def ensure_login_preserving_provider(
         wire_api=first_non_empty_string(provider.get("wire_api"), saved_profile_string(saved_profile, "wire_api", "wireApi")) or "responses",
         model=first_non_empty_string(config.get("model"), saved_profile_string(saved_profile, "model")),
     )
-    auth_updated = without_openai_api_key(auth)
-    auth_changed = auth_updated != dict(auth or {})
+    auth_updated = without_openai_api_key(auth) if login_ready else None
+    auth_changed = auth_updated is not None and auth_updated != dict(auth or {})
     config_changed = updated_config != config_text
     if not config_changed and not auth_changed:
         return {
             "status": "skipped",
-            "reason": "login-preserving provider already enabled",
+            "reason": "login-preserving provider already enabled"
+            if login_ready
+            else "login-preserving provider prepared; waiting for ChatGPT login",
             "config_path": str(config_path),
             "auth_path": str(auth_path),
             "provider": provider_name,
@@ -240,11 +591,11 @@ def ensure_login_preserving_provider(
     auth_backup_path = backup_auth(auth_path) if auth_changed and auth_path.exists() else None
     if config_changed:
         config_path.write_text(updated_config, encoding="utf-8")
-    if auth_changed:
+    if auth_changed and auth_updated is not None:
         auth_path.write_text(json.dumps(auth_updated, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return {
         "status": "updated",
-        "reason": "login-preserving provider enabled",
+        "reason": "login-preserving provider enabled" if login_ready else "login-preserving provider prepared; waiting for ChatGPT login",
         "config_path": str(config_path),
         "auth_path": str(auth_path),
         "provider": provider_name,
@@ -286,6 +637,64 @@ def login_preserving_provider_status(codex_home: str | Path | None = None) -> di
         "provider_requires_openai_auth": provider_requires_auth,
         "provider_has_bearer_token": provider_has_bearer,
         "provider_has_base_url": provider_has_base_url,
+    }
+
+
+def login_preserving_preparation_status(
+    codex_home: str | Path | None = None,
+    *,
+    settings_home: str | Path | None = None,
+) -> dict[str, object]:
+    config_path = config_path_for(codex_home)
+    auth_path = config_path.parent / "auth.json"
+    auth = read_json_object(auth_path)
+    config = read_config(config_path)
+    provider_name = ""
+    provider: dict[str, Any] | None = None
+    if config is not None:
+        provider_name = str(config.get("model_provider") or "openai").strip() or "openai"
+        provider = provider_config(config, provider_name)
+    saved_profile = saved_provider_profile_for(settings_home, provider_name)
+    api_key = first_non_empty_string(
+        auth.get("OPENAI_API_KEY") if auth else None,
+        config.get("OPENAI_API_KEY") if config else None,
+        provider.get("experimental_bearer_token") if provider else None,
+        provider.get("api_key") if provider else None,
+        saved_profile_string(saved_profile, "api_key", "apiKey"),
+    )
+    base_url = first_non_empty_string(
+        provider.get("base_url") if provider else None,
+        saved_profile_string(saved_profile, "base_url", "baseUrl"),
+    )
+    provider_requires_auth = provider.get("requires_openai_auth") is True if provider else provider_name == "openai"
+    provider_has_bearer = bool(first_non_empty_string(provider.get("experimental_bearer_token") if provider else None))
+    provider_has_base_url = bool(first_non_empty_string(provider.get("base_url") if provider else None))
+    provider_api_ready = provider_name not in ("", "openai") and bool(api_key) and bool(base_url)
+    provider_config_ready = (
+        provider_name not in ("", "openai")
+        and provider_requires_auth
+        and provider_has_bearer
+        and provider_has_base_url
+    )
+    missing: list[str] = []
+    if provider_name in ("", "openai"):
+        missing.append("provider")
+    if not base_url:
+        missing.append("base_url")
+    if not api_key:
+        missing.append("api_key")
+    return {
+        "ready": provider_api_ready,
+        "provider_config_ready": provider_config_ready,
+        "provider": provider_name,
+        "api_key_present": bool(api_key),
+        "base_url_present": bool(base_url),
+        "provider_requires_openai_auth": provider_requires_auth,
+        "provider_has_bearer_token": provider_has_bearer,
+        "provider_has_base_url": provider_has_base_url,
+        "missing": missing,
+        "config_path": str(config_path),
+        "auth_path": str(auth_path),
     }
 
 
@@ -350,48 +759,75 @@ def auth_enhancement_flags(mode: str) -> dict[str, object]:
     }
 
 
-def auth_enhancement_message(mode: str, provider_status: dict[str, object], provider_action: dict[str, object] | None = None) -> str:
+def auth_enhancement_message(
+    mode: str,
+    provider_status: dict[str, object],
+    provider_action: dict[str, object] | None = None,
+    *,
+    preparation_status: dict[str, object] | None = None,
+    desired_mode: str | None = None,
+) -> str:
     login_ready = provider_status.get("chatgpt_login_token_present") is True
-    if mode == "loginPreserving" and not login_ready:
-        return "请先在 Codex 中登录 ChatGPT。保留登录态需要检测到官方账号登录后才能启用。"
+    provider_ready = (preparation_status or {}).get("ready") is True
+    if desired_mode == "loginPreserving" and not login_ready:
+        if provider_ready:
+            return "第三方 API Key 已保存到 provider。现在登录 ChatGPT，登录后点“重新检测”即可启用官方登录态保护。"
+        return "请先在供应商配置或 CC Switch 中保存第三方 API Key，再登录 ChatGPT。"
     if mode == "forceInject":
-        return "强制注入已启用：插件入口解锁和强制安装会由前端接管。"
+        return "兼容模式已启用：Codex Mate 会用前端注入补齐插件入口，不会保护移动端或 Remote 登录态。"
     action_status = str((provider_action or {}).get("status") or "")
     action_reason = str((provider_action or {}).get("reason") or "")
     if action_status == "updated":
-        return "保持登录态已启用：已把当前 provider 调整为保留原生登录态的配置。"
+        if login_ready:
+            return "官方登录态保护已开启：第三方 API Key 已写入 provider，auth.json 会继续保留 ChatGPT 登录。"
+        return "第三方 API Key 已先写入 provider。请现在登录 ChatGPT，避免登录时覆盖掉 API Key。"
     if provider_status.get("mode") in ("official", "mixed-api"):
-        return "保持登录态已启用：已关闭前端强制注入，移动端、Remote 和原生入口优先走 Codex 登录态。"
+        return "官方登录态保护已开启：移动端、Remote 和原生入口会优先使用 ChatGPT 登录。"
     if action_reason == "chatgpt login token not found":
-        return "已关闭前端强制注入；当前未检测到 ChatGPT 登录态，请先在 Codex 登录后再切换 provider。"
+        return "未检测到 ChatGPT 登录。请先确认第三方 API Key 已保存到 provider，再去 Codex 登录账号。"
     if action_reason == "provider api key missing":
-        return "推荐模式未启用：当前 provider 缺少 API Key。请在供应商配置里填写 API Key 后点击切换供应商。"
+        return "还不能准备官方登录态保护：当前 provider 缺少 API Key。请先在供应商配置里填写 API Key。"
     if action_reason == "provider base_url not found":
-        return "推荐模式未启用：当前 provider 缺少 Base URL。请在供应商配置里补全 Base URL 后点击切换供应商。"
+        return "还不能准备官方登录态保护：当前 provider 缺少 Base URL。请先在供应商配置里补全 Base URL。"
     if action_reason == "model provider config missing":
-        return "推荐模式未启用：当前 provider 配置不完整。请在供应商配置里补全后点击切换供应商。"
+        return "还不能准备官方登录态保护：当前 provider 配置不完整。请先补全供应商配置。"
     if action_reason:
-        return f"已关闭前端强制注入；当前 provider 暂未自动迁移：{action_reason}。"
-    return "保持登录态已启用：已关闭前端强制注入。"
+        return f"暂未开启官方登录态保护：当前 provider 无法自动迁移，原因是 {action_reason}。"
+    return "官方登录态保护已开启：已关闭前端强制注入。"
 
 
-def auth_enhancement_status_text(mode: str, provider_status: dict[str, object]) -> tuple[str, str]:
+def auth_enhancement_status_text(
+    mode: str,
+    provider_status: dict[str, object],
+    *,
+    preparation_status: dict[str, object] | None = None,
+    desired_mode: str | None = None,
+) -> tuple[str, str]:
     login_ready = provider_status.get("chatgpt_login_token_present") is True
     provider_mode = str(provider_status.get("mode") or "unknown")
     provider = str(provider_status.get("provider") or "openai")
     if not login_ready:
+        if (preparation_status or {}).get("ready") is True:
+            return (
+                "API Key 已保存，等待 ChatGPT 登录"
+                if desired_mode == "loginPreserving"
+                else "API Key 已保存，当前为兼容模式",
+                "第三方 API Key 已放进 provider；现在去 Codex 登录 ChatGPT，登录完成后重新检测即可启用移动端、Remote 和原生入口。"
+                if desired_mode == "loginPreserving"
+                else "如需移动端、Remote 和原生入口，请切到“保护官方登录”后再登录 ChatGPT。",
+            )
         return (
-            "未检测到 ChatGPT 登录",
-            "请先在 Codex 中登录 ChatGPT。登录后点“我已登录，重新检测”，再启用保留登录态。",
+            "先保存第三方 API Key",
+            "ChatGPT 登录会覆盖 auth.json 里的 API Key。请先把 API Key 写入 provider，再登录 ChatGPT。",
         )
     if mode == "loginPreserving":
         return (
-            "已检测到 ChatGPT 登录",
-            f"推荐模式可用：当前 provider 为 {provider}（{provider_mode}），移动端、Remote 和原生入口会优先走官方登录态。",
+            "官方登录态保护已开启",
+            f"当前 provider 为 {provider}（{provider_mode}）。ChatGPT 登录保留在 auth.json，第三方 API Key 写入 provider。",
         )
     return (
         "已检测到 ChatGPT 登录",
-        "当前启用了强制注入。需要保留移动端、Remote 和原生入口时，可以切回推荐模式。",
+        "可以开启官方登录态保护：保留移动端、Remote 和原生入口，同时让模型请求走第三方 API。",
     )
 
 
@@ -424,24 +860,45 @@ def auth_enhancement_mode_status(
 ) -> dict[str, object]:
     settings = read_codex_mate_settings(settings_home)
     provider_status = provider_mode_status(codex_home)
-    login_preserving_available = provider_status.get("chatgpt_login_token_present") is True
-    mode = normalize_auth_enhancement_mode(settings.get("auth_enhancement_mode") or settings.get("authEnhancementMode"))
-    if not mode:
-        mode = default_auth_enhancement_mode_for_provider(provider_status)
-    if mode == "loginPreserving" and not login_preserving_available:
+    preparation_status = login_preserving_preparation_status(codex_home, settings_home=settings_home)
+    login_ready = provider_status.get("chatgpt_login_token_present") is True
+    provider_mode = str(provider_status.get("mode") or "")
+    login_preserving_ready = login_ready and provider_mode in ("official", "mixed-api")
+    desired_mode = normalize_auth_enhancement_mode(settings.get("auth_enhancement_mode") or settings.get("authEnhancementMode"))
+    if not desired_mode:
+        desired_mode = default_auth_enhancement_mode_for_provider(provider_status)
+        if preparation_status.get("ready") is True:
+            desired_mode = "loginPreserving"
+    mode = desired_mode
+    if mode == "loginPreserving" and not login_preserving_ready:
         mode = "forceInject"
-    summary, detail = auth_enhancement_status_text(mode, provider_status)
+    summary, detail = auth_enhancement_status_text(
+        mode,
+        provider_status,
+        preparation_status=preparation_status,
+        desired_mode=desired_mode,
+    )
     return {
         "status": "ok",
         "settings_path": str(settings_path_for(settings_home)),
         "provider_mode": provider_status,
-        "login_preserving_available": login_preserving_available,
-        "needs_chatgpt_login": not login_preserving_available,
-        "recommended_mode": "loginPreserving" if login_preserving_available else "forceInject",
+        "login_preserving_provider": preparation_status,
+        "provider_api_ready": preparation_status.get("ready") is True,
+        "provider_config_ready": preparation_status.get("provider_config_ready") is True,
+        "chatgpt_login_ready": login_ready,
+        "login_preserving_available": login_preserving_ready,
+        "needs_chatgpt_login": not login_ready,
+        "desired_auth_enhancement_mode": desired_mode,
+        "recommended_mode": "loginPreserving" if login_ready or preparation_status.get("ready") is True else "forceInject",
         "summary": summary,
         "detail": detail,
         **auth_enhancement_flags(mode),
-        "message": auth_enhancement_message(mode, provider_status),
+        "message": auth_enhancement_message(
+            mode,
+            provider_status,
+            preparation_status=preparation_status,
+            desired_mode=desired_mode,
+        ),
     }
 
 
@@ -456,22 +913,18 @@ def set_auth_enhancement_mode(
         raise ValueError(f"unsupported auth enhancement mode: {mode}")
 
     before_provider = provider_mode_status(codex_home)
-    if normalized == "loginPreserving" and before_provider.get("chatgpt_login_token_present") is not True:
-        status = auth_enhancement_mode_status(codex_home, settings_home=settings_home)
-        return {
-            **status,
-            "status": "failed",
-            "provider_action": {"status": "skipped", "reason": "chatgpt login token not found"},
-            "message": auth_enhancement_message("loginPreserving", before_provider),
-        }
-
     provider_action: dict[str, object] = {"status": "skipped", "reason": "provider config unchanged"}
     if normalized == "loginPreserving":
         if before_provider.get("mode") in ("official", "mixed-api"):
             provider_action = {"status": "skipped", "reason": "provider already preserves login"}
         else:
             provider_action = ensure_login_preserving_provider(codex_home, settings_home=settings_home)
-            if provider_action.get("status") != "updated":
+            acceptable_reasons = {
+                "login-preserving provider already enabled",
+                "login-preserving provider prepared; waiting for ChatGPT login",
+                "official provider already uses ChatGPT login",
+            }
+            if provider_action.get("status") != "updated" and provider_action.get("reason") not in acceptable_reasons:
                 status = auth_enhancement_mode_status(codex_home, settings_home=settings_home)
                 return {
                     **status,
@@ -490,7 +943,13 @@ def set_auth_enhancement_mode(
         "status": overall_status,
         "provider_mode": after_provider,
         "provider_action": provider_action,
-        "message": auth_enhancement_message(normalized, after_provider, provider_action),
+        "message": auth_enhancement_message(
+            status["auth_enhancement_mode"],
+            after_provider,
+            provider_action,
+            preparation_status=status.get("login_preserving_provider") if isinstance(status.get("login_preserving_provider"), dict) else None,
+            desired_mode=normalized,
+        ),
     }
 
 
@@ -748,8 +1207,8 @@ def provider_profile_message(profile: dict[str, str], provider_status: dict[str,
         return "官方登录模式会保留 Codex 原生登录态，不写入 API Key。"
     if mode == "mixed-api":
         if provider_status.get("chatgpt_login_token_present") is not True:
-            return "保留登录态 + API 需要先在 Codex 中登录 ChatGPT。"
-        return "保留登录态 + API 会写入 provider 配置，并保留移动端、Remote 和原生入口。"
+            return "官方登录 + 第三方 API 会先把 API Key 保存到 provider，再等待你登录 ChatGPT。"
+        return "官方登录 + 第三方 API 会把 API Key 写入 provider，并保留移动端、Remote 和原生入口。"
     return "纯 API 会写入 config.toml 和 auth.json，并启用完整增强。"
 
 
@@ -757,12 +1216,12 @@ def provider_profile_apply_message(profile: dict[str, str], action: dict[str, ob
     if failed:
         reason = str(action.get("reason") or "provider profile apply failed")
         if reason == "chatgpt login token not found":
-            return "当前未检测到 ChatGPT 登录态；请先登录后再使用保留登录态 + API。"
+            return "当前未检测到 ChatGPT 登录态；请先保存 API Key，再登录 ChatGPT。"
         return f"供应商切换失败：{reason}。"
     if profile["mode"] == "official":
         return "已切回官方登录模式；页面增强已设为保留登录态。"
     if profile["mode"] == "mixed-api":
-        return "已切换到保留登录态 + API；页面增强已设为保留登录态。"
+        return "已切换到官方登录 + 第三方 API；官方登录态保护已开启。"
     return "已切换到纯 API；页面增强已设为强制注入。"
 
 
@@ -843,15 +1302,7 @@ def apply_mixed_api_provider_mode(
     config_path = config_path_for(codex_home)
     auth_path = config_path.parent / "auth.json"
     auth = read_json_object(auth_path)
-    if not chatgpt_auth_has_login_token(auth):
-        return {
-            "status": "skipped",
-            "reason": "chatgpt login token not found",
-            "mode": "mixed-api",
-            "config_path": str(config_path),
-            "auth_path": str(auth_path),
-            "provider": provider,
-        }
+    auth_payload = without_openai_api_key(auth) if chatgpt_auth_has_login_token(auth) else None
     return apply_provider_config_with_auth_payload(
         config_path=config_path,
         auth_path=auth_path,
@@ -861,7 +1312,7 @@ def apply_mixed_api_provider_mode(
         api_key=api_key,
         wire_api=wire_api,
         model=model,
-        auth_payload=without_openai_api_key(auth),
+        auth_payload=auth_payload,
         auth_backup_label="provider-mode-mixed-api",
     )
 
@@ -901,7 +1352,7 @@ def apply_provider_config_with_auth_payload(
     api_key: str,
     wire_api: str,
     model: str = "",
-    auth_payload: dict[str, Any],
+    auth_payload: dict[str, Any] | None,
     auth_backup_label: str,
 ) -> dict[str, object]:
     config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -916,9 +1367,9 @@ def apply_provider_config_with_auth_payload(
         model=model,
     )
     auth_text = auth_path.read_text(encoding="utf-8") if auth_path.exists() else ""
-    updated_auth_text = json.dumps(auth_payload, ensure_ascii=False, indent=2) + "\n"
+    updated_auth_text = json.dumps(auth_payload, ensure_ascii=False, indent=2) + "\n" if auth_payload is not None else auth_text
     config_changed = updated_config != config_text
-    auth_changed = updated_auth_text != auth_text
+    auth_changed = auth_payload is not None and updated_auth_text != auth_text
     if not config_changed and not auth_changed:
         return {
             "status": "skipped",
@@ -988,6 +1439,48 @@ def set_remote_feature_flags_in_toml(text: str) -> str:
         if section_end > section_start + 1 and not lines[section_end - 1].endswith("\n"):
             lines[section_end - 1] += "\n"
         lines[section_end:section_end] = missing_lines
+    return "".join(lines)
+
+
+def set_local_marketplace_in_toml(
+    text: str,
+    *,
+    marketplace_name: str,
+    source_path: str,
+) -> str:
+    lines = text.splitlines(keepends=True)
+    section_name = f"marketplaces.{marketplace_name}"
+    section_start = find_table_start(lines, section_name)
+    if section_start is None:
+        if lines and not lines[-1].endswith("\n"):
+            lines[-1] += "\n"
+        if lines and lines[-1].strip():
+            lines.append("\n")
+        lines.append(f"[{section_name}]\n")
+        section_start = len(lines) - 1
+    section_end = find_next_table_start(lines, section_start + 1)
+    assignments = {
+        "last_updated": toml_string(datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")),
+        "source_type": toml_string("local"),
+        "source": toml_string(source_path),
+    }
+    return "".join(upsert_section_assignments(lines, section_start, section_end, assignments))
+
+
+def remove_toml_table(text: str, table_name: str) -> str:
+    lines = text.splitlines(keepends=True)
+    section_start = find_table_start(lines, table_name)
+    if section_start is None:
+        return text
+    section_end = find_next_table_start(lines, section_start + 1)
+    del lines[section_start:section_end]
+    while len(lines) > 1:
+        for index in range(1, len(lines)):
+            if lines[index].strip() == "" and lines[index - 1].strip() == "":
+                del lines[index]
+                break
+        else:
+            break
     return "".join(lines)
 
 

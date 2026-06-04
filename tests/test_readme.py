@@ -45,11 +45,11 @@ def test_readme_describes_2_0_user_path_and_storage_locations():
     assert "## 2.1 更新重点" in text
     assert "右侧问题节点" in text
     assert "## 2.0 更新重点" in text
-    assert "状态驱动的增强模式面板" in text
-    assert "没检测到 ChatGPT token 时，不会把“保持登录态”写成已启用" in text
+    assert "官方登录态保护面板" in text
+    assert "没检测到 ChatGPT token 时，不会把官方登录态保护显示成已开启" in text
     assert "## 推荐使用路径" in text
-    assert "点“启用推荐模式”" in text
-    assert "临时启用强制注入" in text
+    assert "点“保护官方登录”" in text
+    assert "仅使用兼容模式" in text
     assert "## 命令行速查" in text
     assert "python -m codex_mate launch --no-native-feature-sync" in text
     assert "## 数据与备份位置" in text
@@ -66,6 +66,7 @@ def test_readme_describes_transparent_takeover_mode():
     assert "Codex Mate.lnk" in text
     assert "python -m codex_mate watch-disable" in text
     assert "Windows 默认推荐使用 `Codex Mate.lnk`" in text
+    assert "macOS 继续打开原生 Codex" in text
     assert "python -m codex_mate doctor --json" in text
 
 
@@ -102,12 +103,13 @@ def test_readme_describes_mobile_remote_troubleshooting():
     assert "切换供应商" in text
     assert "普通用户只需要" in text
     assert "provider_profile" in text
-    assert "“增强模式”区域会继续显示当前检测结果" in text
+    assert "“官方登录态保护”区域会继续显示当前状态" in text
     assert "~/.codex-mate/settings.json" in text
-    assert "保持登录态" in text
+    assert "官方登录态保护" in text
     assert "强制注入" in text
     assert "我已登录，重新检测" in text
-    assert "未检测到 ChatGPT 登录" in text
+    assert "API Key 已保存" in text
+    assert "先把第三方 API Key 写进 provider" in text
     assert '"mobile_remote"' in text
     assert '"login_preserving_provider"' in text
     assert '"provider_mode"' in text
@@ -142,6 +144,9 @@ def test_readme_describes_one_click_install_script():
     assert "setup.command" in text
     assert "Python 3.11" in text
     assert "如果电脑里没有 Python 和 pip" in text
+    assert "安装后不会再创建额外的 `Codex Mate.app` 快捷方式" in text
+    assert "重新安装或卸载时会自动清理这个旧入口" in text
+    assert "Spotlight 搜索 `Codex Mate`" not in text
 
 
 def test_readme_includes_english_codex_install_prompt():

@@ -4,7 +4,9 @@ set -eu
 cd "$(dirname "$0")"
 CODEX_MATE_BIN="./CodexMate"
 
-clear
+if [ -n "${TERM:-}" ] && [ "${TERM:-}" != "dumb" ]; then
+  clear || true
+fi
 printf '%s\n' '========================================'
 printf '%s\n' '             Codex Mate Setup'
 printf '%s\n' '========================================'
@@ -58,14 +60,14 @@ run_install() {
   else
     printf '\n%s\n' 'Using bundled CodexMate executable.'
   fi
-  printf '\n%s\n' 'Installing Codex Mate app, LaunchAgent, and transparent watcher...'
+  printf '\n%s\n' 'Installing Codex Mate LaunchAgent and transparent watcher...'
   run_codex_mate setup
   printf '\n%s\n' 'Codex Mate installed successfully.'
   printf '%s\n' 'You can keep launching Codex from your normal entry point; Codex Mate will take over automatically.'
 }
 
 run_uninstall() {
-  printf '\n%s\n' 'Uninstalling Codex Mate app, LaunchAgent, and transparent watcher...'
+  printf '\n%s\n' 'Uninstalling Codex Mate LaunchAgent, transparent watcher, and legacy app shortcut...'
   run_codex_mate remove
   printf '\n%s\n' 'Codex Mate uninstalled successfully.'
 }

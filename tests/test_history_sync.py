@@ -201,7 +201,7 @@ def test_sync_history_preserves_existing_index_entries_with_session_file(tmp_pat
     assert [entry["id"] for entry in index_entries] == ["old-thread", "already-current", "file-only"]
 
 
-def test_merge_session_index_uses_updated_at_ms_and_avoids_rewriting_when_unchanged(tmp_path):
+def test_merge_session_index_preserves_existing_updated_at_and_avoids_rewriting_when_unchanged(tmp_path):
     home = tmp_path / ".codex"
     write_config(home)
     conn = sqlite3.connect(home / "state_5.sqlite")
@@ -238,7 +238,7 @@ def test_merge_session_index_uses_updated_at_ms_and_avoids_rewriting_when_unchan
 
     assert first["updated_session_index"] is True
     assert json.loads(content)["thread_name"] == "Stale Title"
-    assert json.loads(content)["updated_at"] == "1970-01-01T00:00:01Z"
+    assert json.loads(content)["updated_at"] == "1970-01-01T00:00:00Z"
     assert second["updated_session_index"] is False
     assert (home / "session_index.jsonl").read_text(encoding="utf-8") == content
 
@@ -278,7 +278,7 @@ def test_merge_session_index_preserves_existing_thread_name_when_database_title_
     entry = json.loads((home / "session_index.jsonl").read_text(encoding="utf-8"))
     assert result["updated_session_index"] is True
     assert entry["thread_name"] == "生成后的会话标题"
-    assert entry["updated_at"] == "1970-01-01T00:00:02Z"
+    assert entry["updated_at"] == "1970-01-01T00:00:00Z"
 
 
 def test_merge_session_index_prefers_latest_rollout_timestamp(tmp_path):
@@ -390,7 +390,7 @@ def test_sync_history_skips_locked_session_files_without_aborting(tmp_path, monk
     assert payload["model_provider"] == "current_provider"
 
 
-def test_sync_history_preserves_session_meta_timestamp_when_repairing_sidecars(tmp_path):
+def test_sync_history_to_current_profile_preserves_session_meta_timestamp_when_repairing_sidecars(tmp_path):
     home = tmp_path / ".codex"
     write_config(home)
     create_current_threads_db(home)
@@ -414,7 +414,7 @@ def test_sync_history_preserves_session_meta_timestamp_when_repairing_sidecars(t
         encoding="utf-8",
     )
 
-    result = history_sync.sync_history_if_ready(history_sync.resolve_paths(home))
+    result = history_sync.sync_history_to_current_profile(history_sync.resolve_paths(home))
 
     assert result["updated_session_files"] == 0
     first_line = json.loads(session_path.read_text(encoding="utf-8").splitlines()[0])
@@ -448,7 +448,7 @@ def test_sync_history_if_ready_skips_when_profile_already_matches(tmp_path):
     assert not (home / "codex_mate_history_backups").exists()
 
 
-def test_sync_history_if_ready_repairs_stale_index_without_backup_when_profile_matches(tmp_path):
+def test_sync_history_if_ready_skips_stale_index_when_profile_matches(tmp_path):
     home = tmp_path / ".codex"
     write_config(home)
     create_current_threads_db(home)
@@ -462,16 +462,18 @@ def test_sync_history_if_ready_repairs_stale_index_without_backup_when_profile_m
 
     assert result["ok"] is True
     assert result["skipped"] is True
-    assert result["sidecar_repaired"] is True
+    assert result["mismatched_provider_threads"] == 0
+    assert result["mismatched_model_threads"] == 0
+    assert "sidecar_repaired" not in result
     assert "backup_path" not in result
     assert not (home / "codex_mate_history_backups").exists()
     index_entries = [json.loads(line) for line in (home / "session_index.jsonl").read_text(encoding="utf-8").splitlines()]
-    assert [entry["id"] for entry in index_entries] == ["current-thread", "current-thread-2"]
+    assert [entry["id"] for entry in index_entries] == ["current-thread"]
     assert index_entries[0]["thread_name"] == "Existing Title"
-    assert index_entries[0]["updated_at"] == "1970-01-01T00:01:40Z"
+    assert index_entries[0]["updated_at"] == "1970-01-01T00:00:00Z"
 
 
-def test_sync_history_if_ready_repairs_stale_database_timestamp_from_rollout(tmp_path):
+def test_sync_history_if_ready_skips_stale_database_timestamp_when_profile_matches(tmp_path):
     home = tmp_path / ".codex"
     write_config(home)
     session_path = write_session_file(home, "current-thread", "current_provider", "gpt-current")
@@ -514,13 +516,16 @@ def test_sync_history_if_ready_repairs_stale_database_timestamp_from_rollout(tmp
 
     result = history_sync.sync_history_if_ready(history_sync.resolve_paths(home))
 
-    assert result["updated_database_timestamps"] == 1
-    assert result["updated_session_files"] == 0
+    assert result["ok"] is True
+    assert result["skipped"] is True
+    assert result["mismatched_provider_threads"] == 0
+    assert result["mismatched_model_threads"] == 0
+    assert "updated_database_timestamps" not in result
+    assert "updated_session_files" not in result
     with sqlite3.connect(home / "state_5.sqlite") as conn:
         row = conn.execute("SELECT updated_at, updated_at_ms FROM threads WHERE id = ?", ("current-thread",)).fetchone()
-    assert row == (1767226026, 1767226026321)
-    index_entry = json.loads((home / "session_index.jsonl").read_text(encoding="utf-8"))
-    assert index_entry["updated_at"] == "2026-01-01T00:07:06Z"
+    assert row == (1767225600, 1767225600000)
+    assert not (home / "session_index.jsonl").exists()
 
 
 def test_sync_history_if_ready_syncs_when_profile_mismatches(tmp_path):

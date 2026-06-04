@@ -86,6 +86,9 @@ def test_renderer_script_enables_plugin_entry_for_api_key_users():
     assert "disabled = false" in plugin_entry_code
     assert "removeAttribute(\"disabled\")" in plugin_entry_code
     assert "setAuthMethod(\"chatgpt\")" in text
+    assert "spoofChatGPTAuthContexts" in text
+    assert "preparePluginRuntimeUnlock" in plugin_entry_code
+    assert 'document.querySelectorAll(\'nav[role="navigation"], main, button, [role="button"]\')' in text
     assert "插件 - 已解锁" in plugin_entry_code
     assert "Plugins - Unlocked" in plugin_entry_code
     assert "labelUnlockedPluginEntry" in plugin_entry_code
@@ -100,13 +103,74 @@ def test_renderer_script_enables_plugin_entry_for_api_key_users():
     assert "__STATSIG__" in text
     assert '"browser_use_external"' in text
     assert '"410065390"' in text
+    assert '"4218407052"' in text
+    assert "pluginGateOverrides" in text
+    assert '["4218407052", true]' in text
     assert "client.checkGate" in text
     assert "client.getFeatureGate" in text
     assert "codexMateChromeGateVersion" in text
     scan_start = text.index("function scanLightweight")
     scan_end = text.index("\n\n  function scanDeferred", scan_start)
     scan_code = text[scan_start:scan_end]
-    assert "installChromePluginGateOverride()" in scan_code
+    assert "refreshPluginRuntimeUnlock()" in scan_code
+
+
+def test_renderer_script_patches_curated_plugin_marketplace_visibility():
+    text = Path("codex_mate/inject/renderer-inject.js").read_text(encoding="utf-8")
+    assert "codexMatePluginListPatchVersion" in text
+    assert 'codexMatePluginListPatchVersion = "4"' in text
+    assert "__codexMatePluginListLoadedVersion" in text
+    assert "__codexMatePluginListMessagePatch = null" in text
+    assert "__codexMatePluginListRequestPatch = null" in text
+    assert "codexPluginEnabledVersion" in text
+    assert "__codexMatePluginRuntimeRefreshTimers" in text
+    assert "refreshPluginRuntimeUnlock" in text
+    assert "schedulePluginRuntimeUnlockRefresh" in text
+    assert "[120, 420, 900, 1800, 3200]" in text
+    assert "installPluginMarketplaceDefaultPatch" in text
+    assert "patchJsxRuntimePluginMarketplaceDefaults" in text
+    assert "normalizePluginMarketplaceControlsProps" in text
+    assert "primaryMarketplaceTabs" in text
+    assert "selectedMarketplaceFilterValue" in text
+    assert "marketplaceFilterOptions" in text
+    assert "loadCodexAppModule(\"jsx-runtime-\")" in text
+    assert "codexMatePluginMarketplaceDefaultJsx" in text
+    assert "codexMatePluginMarketplaceDefaultJsxs" in text
+    assert "isOfficialPluginMarketplaceOption" in text
+    assert "isBundledPluginMarketplaceOption" in text
+    assert "selectOfficialPluginMarketplace" not in text
+    assert "scheduleOfficialPluginMarketplaceSelection" not in text
+    assert "Built by OpenAI" in text
+    assert "codexMatePatchVersionRank" in text
+    assert "installCodexMateVersionGuard" in text
+    assert 'installCodexMateVersionGuard(window, "__codexMatePluginListRequestPatch")' in text
+    assert 'installCodexMateVersionGuard(client, "__codexMatePluginListPatch")' in text
+    assert "codexMatePatchVersionRank(value) < codexMatePatchVersionRank(this[storeKey])" in text
+    assert "installPluginListMarketplacePatch" in text
+    assert "patchPluginListResult" in text
+    assert "patchAppServerPluginRequestClient" in text
+    assert "patchPluginListResponseData" in text
+    assert "loadCodexAppModule(\"app-server-manager-signals-\")" in text
+    assert 'method === "send-cli-request-for-host"' in text
+    assert 'normalized === "plugin/list" || normalized === "list-plugins" || normalized === "listPlugins"' in text
+    assert "patchPluginListRequestParams" in text
+    assert "officialPluginMarketplaceName" in text
+    assert 'return "openai-curated"' in text
+    assert 'next.marketplaceName = "openai-curated"' in text
+    assert "originalSendRequest(method, patchedParams, options)" in text
+    assert 'new Set(["openai-curated", "openai-curated-remote", "codex-mate-curated"])' in text
+    assert "normalizedCuratedPluginMarketplaceName" in text
+    assert 'return "openai-curated"' in text
+    assert "codexMateCuratedMarketplaceDisplayName" not in text
+    assert "name: codexMateCuratedMarketplaceDisplayName" not in text
+    assert "marketplaceName: codexMateCuratedMarketplaceDisplayName" not in text
+    assert "marketplaceName," in text
+    assert 'pluginEntryUnlock && event?.type === "codex-message-from-view"' in text
+    assert "window.__codexMatePluginListRequestIds" in text
+    scan_start = text.index("function scanLightweight")
+    scan_end = text.index("\n\n  function scanDeferred", scan_start)
+    scan_code = text[scan_start:scan_end]
+    assert "refreshPluginRuntimeUnlock()" in scan_code
 
 
 def test_renderer_script_unblocks_connector_unavailable_plugin_install_buttons_without_full_body_text_scan():
@@ -240,7 +304,7 @@ def test_renderer_script_sidebar_delete_opens_on_pointerup_when_click_is_unrelia
 
     text = Path("codex_mate/inject/renderer-inject.js").read_text(encoding="utf-8")
     assert "updateDeleteButtonOffsets" in text
-    assert "codexDeleteStyleVersion = \"21\"" in text
+    assert "codexDeleteStyleVersion = \"25\"" in text
     assert "right: max(66px, var(--codex-session-actions-right, 28px))" in text
     assert "确认" in text
     assert "归档对话" in text
@@ -480,11 +544,27 @@ def test_renderer_script_adds_conversation_timeline_and_scroll_restore():
     assert "--codex-timeline-surface: rgba(255,255,255,.98);" in text
     assert "@media (prefers-color-scheme: dark)" in text
     assert 'data-preview-open="true"' in text
-    assert "timelinePanelClass" not in text
-    assert "timelineListClass" not in text
-    assert "timelineItemClass" not in text
-    assert "codex-conversation-timeline-panel" not in text
-    assert "createConversationTimelineItem" not in text
+    assert "timelineToggleClass" in text
+    assert "timelinePanelClass" in text
+    assert "timelineItemClass" in text
+    assert "codex-conversation-timeline-toggle" in text
+    assert "codex-conversation-timeline-panel" in text
+    assert "codex-conversation-timeline-item" in text
+    assert "createConversationTimelineToggle" in text
+    assert "createConversationTimelineItem" in text
+    assert "setConversationTimelinePanelOpen" in text
+    assert 'root.dataset.panelOpen = "false"' in text
+    assert 'root.appendChild(toggle)' in text
+    assert 'panel.appendChild(createConversationTimelineItem(item, index, root))' in text
+    assert 'setConversationTimelinePanelOpen(root, false)' in text
+    assert "pointer-events: none;" in text
+    assert "right: 12px;" in text
+    assert "width: 48px;" in text
+    assert "height: 44px;" in text
+    assert 'button.textContent = "目录"' in text
+    assert 'right: 58px;' in text
+    assert "root.appendChild(marker)" not in text
+    assert "root.appendChild(track)" not in text
     assert "installConversationTimelineHoverStabilizer" not in text
     assert "scheduleConversationTimelineClose" not in text
     assert "background: var(--codex-timeline-surface)" in text
@@ -495,8 +575,11 @@ def test_renderer_script_adds_conversation_timeline_and_scroll_restore():
     assert "function timelineCalibrationAnchor" in text
     assert "function calibratedTimelineTargetPercent" in text
     assert "timelineItemReferencePercent(item)" in text
-    assert "approximateScrollTimelineTarget(item, { calibrated: true })" in text
+    assert 'approximateScrollTimelineTarget(item, { calibrated: true, behavior: "auto" })' in text
     assert "retryResolveTimelineTarget" in text
+    assert "clearConversationTimelineRetryTimers" in text
+    assert "scheduleConversationTimelineRetry" in text
+    assert "__codexConversationTimelineRetryTimers" in text
     assert "markTimelineProgrammaticScroll" in text
     assert "function timelineItemIndex" in text
     assert "function selectTimelineTargetCandidate" in text
@@ -570,15 +653,16 @@ def test_renderer_script_does_not_include_fast_mode_patch():
     assert "提出问题" in text
     assert "https://github.com/serein431/Codex-Mate/issues" in text
     assert "window.open(issueUrl, \"_blank\")" in text
-    assert "增强模式" in text
-    assert "保持登录态" in text
-    assert "强制注入" in text
-    assert "当前检测" in text
+    assert "Codex Mate 桥接超时，请重新打开 Codex 或从 Codex Mate 启动器重新接管。" in text
+    assert "window.__codexMateBridgeDisabledUntil = Date.now() + 10000" in text
+    assert "官方登录态保护" in text
+    assert "保护官方登录" in text
+    assert "当前状态" in text
     assert "未检测到 ChatGPT 登录" in text
     assert "我已登录，重新检测" in text
-    assert 'button.textContent = waiting ? "正在检测…" : loginReady ? "重新检测" : "我已登录，重新检测"' in text
-    assert "启用推荐模式" in text
-    assert "临时启用强制注入" in text
+    assert 'button.textContent = waiting ? "正在检测…" : loginReady ? "重新检测" : providerApiReady ? "我已登录，重新检测" : "重新检测"' in text
+    assert "先把第三方 API Key 写入 provider，再登录 ChatGPT" in text
+    assert "仅使用兼容模式" in text
     assert "供应商配置" in text
     assert "CC Switch 速切" in text
     assert "data-codex-mate-cc-switch-list" in text
@@ -588,7 +672,9 @@ def test_renderer_script_does_not_include_fast_mode_patch():
     assert "applyCodexMateCcSwitchProvider" in text
     assert 'postJson("/cc-switch/providers", {})' in text
     assert 'postJson("/cc-switch/apply", { source_id: sourceId })' in text
-    assert "保留登录态 + API" in text
+    assert 'if (path === "/cc-switch/apply") return 30000;' in text
+    assert "bridgeFailure = { status: \"failed\", message: error?.message || \"Codex Mate bridge timeout\" }" in text
+    assert "官方登录 + 第三方 API" in text
     assert "纯 API" in text
     assert "官方登录" in text
     assert "data-codex-mate-provider-mode" in text
@@ -603,6 +689,8 @@ def test_renderer_script_does_not_include_fast_mode_patch():
     assert "data-codex-mate-auth-detail" in text
     assert "data-codex-mate-auth-mode" in text
     assert "authEnhancementMode" in text
+    assert "authProtectionStepState" in text
+    assert "data-codex-mate-auth-step" in text
     assert "setCodexMateAuthMode" in text
     assert "checkCodexMateAuthModeStatus" in text
     assert 'postJson("/auth-enhancement-mode/status", {})' in text
@@ -651,8 +739,8 @@ def test_renderer_script_does_not_include_fast_mode_patch():
     assert "removeDuplicateCodexMateMenus" in text
     assert "data-codex-mate-menu" in text
     assert "label.startsWith(\"Codex Mate\")" in text
-    assert "codexMateMenuVersion = \"26\"" in text
-    assert "codexMateTriggerInstalled = \"26\"" in text
+    assert "codexMateMenuVersion = \"27\"" in text
+    assert "codexMateTriggerInstalled = \"27\"" in text
     assert "codexMateFileButtonVersion" not in text
     assert "function visibleRightPanelLeft" in text
     assert "[role='tabpanel'], .absolute.top-0.bottom-0.left-0" in text

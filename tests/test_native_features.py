@@ -1,5 +1,6 @@
 from pathlib import Path
 import json
+import shutil
 import sqlite3
 
 from codex_mate import native_features
@@ -26,6 +27,47 @@ def create_cc_switch_db(path, rows):
         )
 
 
+def write_bundled_plugin(root: Path, name: str, version: str = "1.0.0") -> None:
+    plugin_dir = root / "plugins" / name / ".codex-plugin"
+    plugin_dir.mkdir(parents=True, exist_ok=True)
+    (plugin_dir / "plugin.json").write_text(
+        json.dumps({"name": name, "version": version}),
+        encoding="utf-8",
+    )
+
+
+def write_bundled_marketplace(root: Path, names: list[str]) -> None:
+    manifest_path = root / ".agents" / "plugins" / "marketplace.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "name": "openai-bundled",
+                "interface": {"version": 1},
+                "plugins": [{"name": name, "source": {"source": "local", "path": f"./plugins/{name}"}} for name in names],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def write_curated_marketplace(root: Path, names: list[str], marketplace_name: str = "openai-curated") -> None:
+    manifest_path = root / ".agents" / "plugins" / "marketplace.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "name": marketplace_name,
+                "interface": {"version": 1},
+                "plugins": [{"name": name, "source": {"source": "local", "path": f"./plugins/{name}"}} for name in names],
+            }
+        ),
+        encoding="utf-8",
+    )
+    for name in names:
+        write_bundled_plugin(root, name)
+
+
 def test_remote_feature_status_reports_missing_flags(tmp_path):
     codex_home = tmp_path / ".codex"
     codex_home.mkdir()
@@ -41,6 +83,125 @@ def test_remote_feature_status_reports_missing_flags(tmp_path):
     assert payload["enabled"] == {"codex_hooks": True}
     assert "local_remote_dropdown" in payload["missing"]
     assert "cloud_follow_up_local_remote_dropdown" in payload["missing"]
+
+
+def test_ensure_bundled_plugin_marketplace_cache_copies_new_codex_plugins(tmp_path):
+    codex_home = tmp_path / ".codex"
+    source_root = tmp_path / "Codex.app" / "Contents" / "Resources" / "plugins" / "openai-bundled"
+    cache_root = codex_home / ".tmp" / "bundled-marketplaces" / "openai-bundled"
+    write_bundled_marketplace(source_root, ["browser", "chrome", "sites"])
+    write_bundled_plugin(source_root, "browser", "1.0.0")
+    write_bundled_plugin(source_root, "chrome", "1.0.0")
+    write_bundled_plugin(source_root, "sites", "2.0.0")
+    write_bundled_marketplace(cache_root, ["browser", "chrome"])
+    write_bundled_plugin(cache_root, "browser", "1.0.0")
+    write_bundled_plugin(cache_root, "chrome", "1.0.0")
+
+    payload = native_features.ensure_bundled_plugin_marketplace_cache(codex_home, app_dir=tmp_path / "Codex.app")
+
+    assert payload["status"] == "updated"
+    assert payload["ready"] is True
+    assert payload["source_plugins"] == {"browser": "1.0.0", "chrome": "1.0.0", "sites": "2.0.0"}
+    assert native_features.bundled_plugin_signature(cache_root) == payload["source_plugins"]
+
+
+def test_ensure_bundled_plugin_marketplace_cache_skips_when_current(tmp_path):
+    codex_home = tmp_path / ".codex"
+    source_root = tmp_path / "Codex.app" / "Contents" / "Resources" / "plugins" / "openai-bundled"
+    cache_root = codex_home / ".tmp" / "bundled-marketplaces" / "openai-bundled"
+    for root in (source_root, cache_root):
+        write_bundled_marketplace(root, ["browser"])
+        write_bundled_plugin(root, "browser", "1.0.0")
+
+    payload = native_features.ensure_bundled_plugin_marketplace_cache(codex_home, app_dir=tmp_path / "Codex.app")
+
+    assert payload["status"] == "skipped"
+    assert payload["ready"] is True
+
+
+def test_ensure_curated_plugin_marketplace_registered_adds_local_marketplace(tmp_path):
+    codex_home = tmp_path / ".codex"
+    codex_home.mkdir()
+    marketplace_root = codex_home / ".tmp" / "plugins"
+    alias_root = codex_home / ".tmp" / "codex-mate-marketplaces" / "openai-bundled"
+    config_path = codex_home / "config.toml"
+    config_path.write_text(
+        "[marketplaces.openai-bundled]\n"
+        'source_type = "local"\n'
+        f"source = {json.dumps(str(alias_root))}\n"
+        "\n"
+        "[marketplaces.openai-curated]\n"
+        'source_type = "local"\n'
+        f"source = {json.dumps(str(marketplace_root))}\n"
+        "\n"
+        '[plugins."browser@openai-bundled"]\n'
+        "enabled = true\n",
+        encoding="utf-8",
+    )
+    write_curated_marketplace(marketplace_root, ["linear", "notion"])
+
+    payload = native_features.ensure_curated_plugin_marketplace_registered(codex_home)
+
+    config = native_features.read_config(config_path)
+    assert payload["status"] == "updated"
+    assert payload["ready"] is True
+    assert payload["plugin_count"] == 2
+    assert payload["alias_ready"] is False
+    assert "openai-bundled" not in config["marketplaces"]
+    assert config["marketplaces"]["openai-curated"]["source_type"] == "local"
+    assert config["marketplaces"]["openai-curated"]["source"] == str(marketplace_root)
+    assert config["plugins"]["browser@openai-bundled"]["enabled"] is True
+    assert Path(payload["backup_path"]).exists()
+
+
+def test_ensure_curated_plugin_marketplace_registered_skips_when_source_missing(tmp_path):
+    codex_home = tmp_path / ".codex"
+    codex_home.mkdir()
+    config_path = codex_home / "config.toml"
+    config_path.write_text("", encoding="utf-8")
+
+    payload = native_features.ensure_curated_plugin_marketplace_registered(codex_home)
+
+    assert payload["status"] == "skipped"
+    assert payload["source_ready"] is False
+    assert "openai-bundled" not in config_path.read_text(encoding="utf-8")
+
+
+def test_ensure_curated_plugin_marketplace_registered_skips_when_already_registered(tmp_path):
+    codex_home = tmp_path / ".codex"
+    codex_home.mkdir()
+    marketplace_root = codex_home / ".tmp" / "plugins"
+    config_path = codex_home / "config.toml"
+    write_curated_marketplace(marketplace_root, ["linear"])
+    config_path.write_text(
+        "[marketplaces.openai-curated]\n"
+        'last_updated = "2026-06-03T00:00:00Z"\n'
+        'source_type = "local"\n'
+        f"source = {json.dumps(str(marketplace_root))}\n",
+        encoding="utf-8",
+    )
+
+    payload = native_features.ensure_curated_plugin_marketplace_registered(codex_home)
+
+    assert payload["status"] == "skipped"
+    assert payload["ready"] is True
+    assert not (codex_home / "codex_mate_config_backups").exists()
+
+
+def test_ensure_curated_plugin_marketplace_registered_skips_invalid_plugin_paths(tmp_path):
+    codex_home = tmp_path / ".codex"
+    codex_home.mkdir()
+    marketplace_root = codex_home / ".tmp" / "plugins"
+    config_path = codex_home / "config.toml"
+    config_path.write_text("", encoding="utf-8")
+    write_curated_marketplace(marketplace_root, ["linear"])
+    shutil.rmtree(marketplace_root / "plugins" / "linear")
+
+    payload = native_features.ensure_curated_plugin_marketplace_registered(codex_home)
+
+    assert payload["status"] == "skipped"
+    assert payload["invalid_plugins"] == ["linear"]
+    assert "openai-bundled" not in config_path.read_text(encoding="utf-8")
 
 
 def test_ensure_remote_feature_flags_updates_existing_features_section(tmp_path):
@@ -137,7 +298,7 @@ def test_ensure_login_preserving_provider_moves_api_key_out_of_auth(tmp_path):
     assert Path(payload["auth_backup_path"]).exists()
 
 
-def test_ensure_login_preserving_provider_skips_without_chatgpt_tokens(tmp_path):
+def test_ensure_login_preserving_provider_prepares_api_key_before_chatgpt_login(tmp_path):
     codex_home = tmp_path / ".codex"
     codex_home.mkdir()
     auth_path = codex_home / "auth.json"
@@ -153,10 +314,13 @@ def test_ensure_login_preserving_provider_skips_without_chatgpt_tokens(tmp_path)
 
     payload = native_features.ensure_login_preserving_provider(codex_home)
 
-    assert payload["status"] == "skipped"
-    assert payload["reason"] == "chatgpt login token not found"
+    config = native_features.read_config(config_path)
+    provider = config["model_providers"]["custom"]
+    assert payload["status"] == "updated"
+    assert payload["reason"] == "login-preserving provider prepared; waiting for ChatGPT login"
     assert native_features.read_json_object(auth_path)["OPENAI_API_KEY"] == "sk-auth"
-    assert "requires_openai_auth" not in config_path.read_text(encoding="utf-8")
+    assert provider["requires_openai_auth"] is True
+    assert provider["experimental_bearer_token"] == "sk-auth"
 
 
 def test_apply_official_provider_mode_clears_api_mode_without_removing_chatgpt_tokens(tmp_path):
@@ -190,7 +354,7 @@ def test_apply_official_provider_mode_clears_api_mode_without_removing_chatgpt_t
     assert 'OPENAI_API_KEY = "sk-root"' not in config_text
 
 
-def test_apply_mixed_api_provider_mode_requires_chatgpt_tokens(tmp_path):
+def test_apply_mixed_api_provider_mode_prepares_config_before_chatgpt_login(tmp_path):
     codex_home = tmp_path / ".codex"
     codex_home.mkdir()
     (codex_home / "auth.json").write_text('{"auth_mode":"apikey","OPENAI_API_KEY":"sk-old"}\n', encoding="utf-8")
@@ -204,8 +368,11 @@ def test_apply_mixed_api_provider_mode_requires_chatgpt_tokens(tmp_path):
         api_key="sk-new",
     )
 
-    assert payload["status"] == "skipped"
-    assert payload["reason"] == "chatgpt login token not found"
+    config = native_features.read_config(codex_home / "config.toml")
+    provider = config["model_providers"]["custom"]
+    assert payload["status"] == "updated"
+    assert payload["reason"] == "mixed-api provider mode enabled"
+    assert provider["experimental_bearer_token"] == "sk-new"
     assert native_features.read_json_object(codex_home / "auth.json")["OPENAI_API_KEY"] == "sk-old"
 
 
@@ -306,6 +473,43 @@ def test_apply_provider_profile_mixed_api_saves_profile_and_login_preserving_mod
     assert provider["requires_openai_auth"] is True
     assert provider["experimental_bearer_token"] == "sk-new"
     assert "OPENAI_API_KEY" not in auth
+    assert settings["auth_enhancement_mode"] == "loginPreserving"
+    assert settings["provider_profile"]["api_key"] == "sk-new"
+
+
+def test_apply_provider_profile_mixed_api_prepares_before_chatgpt_login(tmp_path):
+    codex_home = tmp_path / ".codex"
+    settings_home = tmp_path / ".codex-mate"
+    codex_home.mkdir()
+    auth_path = codex_home / "auth.json"
+    config_path = codex_home / "config.toml"
+    auth_path.write_text('{"auth_mode":"apikey","OPENAI_API_KEY":"sk-old"}\n', encoding="utf-8")
+    config_path.write_text("", encoding="utf-8")
+
+    payload = native_features.apply_provider_profile(
+        codex_home,
+        settings_home=settings_home,
+        profile={
+            "mode": "mixed-api",
+            "provider": "jmrai",
+            "base_url": "https://jmrai.example/v1",
+            "api_key": "sk-new",
+            "model": "gpt-5.5",
+            "wire_api": "responses",
+        },
+    )
+
+    config = native_features.read_config(config_path)
+    auth = native_features.read_json_object(auth_path)
+    settings = native_features.read_json_object(settings_home / "settings.json")
+    provider = config["model_providers"]["jmrai"]
+    assert payload["status"] == "updated"
+    assert payload["auth_enhancement_mode"] == "forceInject"
+    assert payload["desired_auth_enhancement_mode"] == "loginPreserving"
+    assert payload["provider_api_ready"] is True
+    assert "登录后" in payload["message"]
+    assert auth["OPENAI_API_KEY"] == "sk-old"
+    assert provider["experimental_bearer_token"] == "sk-new"
     assert settings["auth_enhancement_mode"] == "loginPreserving"
     assert settings["provider_profile"]["api_key"] == "sk-new"
 
@@ -749,7 +953,7 @@ def test_set_auth_enhancement_mode_login_preserving_fails_without_provider_api_k
     assert "experimental_bearer_token" not in config_path.read_text(encoding="utf-8")
 
 
-def test_set_auth_enhancement_mode_login_preserving_fails_without_chatgpt_login(tmp_path):
+def test_set_auth_enhancement_mode_login_preserving_prepares_api_key_before_chatgpt_login(tmp_path):
     codex_home = tmp_path / ".codex"
     settings_home = tmp_path / ".codex-mate"
     codex_home.mkdir()
@@ -768,9 +972,15 @@ def test_set_auth_enhancement_mode_login_preserving_fails_without_chatgpt_login(
         mode="loginPreserving",
     )
 
-    assert payload["status"] == "failed"
+    config = native_features.read_config(codex_home / "config.toml")
+    provider = config["model_providers"]["custom"]
+    settings = native_features.read_json_object(settings_home / "settings.json")
+    assert payload["status"] == "updated"
     assert payload["auth_enhancement_mode"] == "forceInject"
+    assert payload["desired_auth_enhancement_mode"] == "loginPreserving"
     assert payload["login_preserving_available"] is False
-    assert "请先在 Codex 中登录 ChatGPT" in payload["message"]
-    assert not (settings_home / "settings.json").exists()
+    assert payload["provider_api_ready"] is True
+    assert "API Key 已保存" in payload["message"]
+    assert settings["auth_enhancement_mode"] == "loginPreserving"
     assert native_features.read_json_object(auth_path)["OPENAI_API_KEY"] == "sk-auth"
+    assert provider["experimental_bearer_token"] == "sk-auth"

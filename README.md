@@ -34,7 +34,7 @@ Maintainer resources:
 
 ## 主要功能
 
-- 2.0 增强模式面板：先检测 ChatGPT 登录态，再给出推荐操作
+- 2.0 官方登录态保护面板：先保存第三方 API Key，再引导登录 ChatGPT
 - 保留 Codex 原生登录态，同时把第三方 API Key 混入当前 provider
 - 必要时临时启用前端强制注入，解锁 API Key 模式下的插件入口
 - 在会话列表悬停显示“删除”按钮
@@ -61,9 +61,9 @@ Maintainer resources:
 
 2.0 是一次围绕“更容易装、更容易看懂状态、更不容易把 Codex 原生能力弄丢”的大更新。
 
-- 新增状态驱动的增强模式面板：不再让用户盲选“保持登录态”或“强制注入”，而是先检测本机是否已经登录 ChatGPT。
-- 新增推荐模式：检测到 ChatGPT 登录态后，可以一键启用“保留登录态 + 第三方 API 混入”的推荐配置。
-- 新增登录态保护：没检测到 ChatGPT token 时，不会把“保持登录态”写成已启用，避免误导用户。
+- 新增官方登录态保护面板：先确认第三方 API Key 已写入 provider，再用步骤状态告诉用户接下来该做什么。
+- 新增“官方登录 + 第三方 API”：可以先把第三方 API Key 写入 provider，再登录 ChatGPT，避免登录时覆盖掉 `auth.json` 里的 API Key。
+- 新增登录态保护校验：没检测到 ChatGPT token 时，不会把官方登录态保护显示成已开启，避免误导用户。
 - 新增 provider 模式管理：支持 `official`、`mixed-api`、`pure-api` 三种模式，并提供命令行精确切换。
 - 改进移动端 / Remote 检查：`doctor --json` 会说明原生入口是否满足显示条件，以及缺的是登录态、API Key 状态、provider 配置还是 Remote feature flags。
 - 改进历史同步：切换账号、provider 或模型后，尽量把本机已有会话重新对齐到当前配置。
@@ -78,10 +78,11 @@ Maintainer resources:
 1. 下载当前系统对应的平台包：Windows 下载 `CodexMate-windows.zip`，macOS 下载 `CodexMate-macos.zip`。
 2. 运行安装脚本：Windows 打开 `setup.bat`，macOS 右键打开 `setup.command`。
 3. 从 Codex Mate 入口启动 Codex，打开顶部 `CM` 面板。
-4. 看增强模式里的“当前检测”：
-   - 如果显示“已检测到 ChatGPT 登录”，点“启用推荐模式”。
-   - 如果显示“未检测到 ChatGPT 登录”，先回到 Codex 登录 ChatGPT，再点“我已登录，重新检测”。
-   - 如果只是临时想解锁插件入口，可以点“临时启用强制注入”。
+4. 看“官方登录态保护”里的“当前状态”：
+   - 如果还没登录 ChatGPT，先点“保护官方登录”或在“供应商配置 / CC Switch 速切”里保存第三方 API Key。
+   - 等状态显示“API Key 已保存”后，再回到 Codex 登录 ChatGPT。
+   - 登录完成后点“我已登录，重新检测”，状态会切到官方登录态保护。
+   - 如果只是临时想解锁插件入口，可以点“仅使用兼容模式”。
 5. 如果历史记录、移动端入口或 Remote 入口不对，先运行 `doctor` 看真实状态，再按输出修复。
 
 Codex Mate 不会修改 Codex App 安装包，也不会替换 `app.asar`。所有增强都通过外部启动、CDP 注入、本地 helper 和本机配置文件完成。
@@ -147,7 +148,9 @@ Please do the following end to end:
 5. Run the installer:
    - Windows: run setup.bat and choose "Install Codex Mate"
    - macOS: run setup.command and choose "Install Codex Mate"
-6. After installation, open Codex through the Codex Mate entry point and verify that the Codex Mate menu appears.
+6. After installation, open Codex and verify that the Codex Mate menu appears:
+   - Windows: open Codex through the Codex Mate shortcut.
+   - macOS: open the original Codex app; Codex Mate should take over through the watcher.
 7. Run the built-in doctor command if available and summarize whether CDP, helper, watcher, mobile/remote readiness, and injection look healthy.
 8. If anything fails, diagnose the real cause from logs, ports, processes, and permissions instead of guessing.
 
@@ -231,26 +234,22 @@ Codex Mate.lnk
 ~/Applications/Codex.app
 ```
 
-安装后会生成：
-
-```text
-/Applications/Codex Mate.app
-```
-
-同时会注册用户级 LaunchAgent：
+安装后不会再创建额外的 `Codex Mate.app` 快捷方式。macOS 会注册用户级 LaunchAgent：
 
 ```text
 ~/Library/LaunchAgents/dev.codexmate.watcher.plist
 ```
 
+如果旧版本曾经留下 `/Applications/Codex Mate.app`，重新安装或卸载时会自动清理这个旧入口。
+
 ## macOS 打开
 
-安装后可以从以下任意入口打开：
+安装后继续从原来的 Codex 入口打开即可：
 
-- `/Applications/Codex Mate.app`
-- Spotlight 搜索 `Codex Mate`
-- Dock 里的 Codex Mate
-- 原来的 Codex 入口
+- `/Applications/Codex.app`
+- `/Applications/OpenAI Codex.app`
+- Spotlight 搜索 `Codex`
+- Dock 里的原生 Codex
 
 macOS 默认会安装透明接管 watcher。也就是说，即使你从原来的 Codex 入口打开，Codex Mate 也会尝试自动完成增强启动和注入。
 
@@ -322,18 +321,19 @@ Codex Mate 把 provider 分成三种明确模式：
 
 打开 CM 面板后，顶部会先显示“供应商配置”。普通用户只需要在这里选择模式、填写 `Base URL`、`API Key`、`Model`，再点击“切换供应商”。Codex Mate 会自动生成并写入 `config.toml` / `auth.json`，不需要手动编辑文件。
 
-供应商配置切换成功后，会自动联动增强模式：
+供应商配置切换成功后，会自动联动官方登录态保护：
 
-- `official` 和 `mixed-api` 会切到“保留登录态”，优先保留移动端、Remote 和原生入口。
-- `pure-api` 会切到“强制注入”，适合只使用 API Key 的环境。
+- `official` 和 `mixed-api` 会优先保护官方登录态，保留移动端、Remote 和原生入口。
+- `pure-api` 会切到兼容模式，适合只使用 API Key 的环境。
 
-“增强模式”区域会继续显示当前检测结果，而不是让你盲选模式。
+“官方登录态保护”区域会继续显示当前状态，而不是让你盲选模式。
 
-- 如果检测到 ChatGPT 登录态，会显示“已检测到 ChatGPT 登录”，并提供“启用推荐模式”。推荐模式会关闭前端插件入口强制改写，并优先保持 Codex 原生登录态。如果当前 provider 可以安全迁移，Codex Mate 会把 API Key 移到 provider 的 `experimental_bearer_token`，同时保留 `auth.json` 里的 ChatGPT token。
-- 如果没有检测到 ChatGPT 登录态，会显示“未检测到 ChatGPT 登录”。这时请先在 Codex 中登录 ChatGPT，然后点击“我已登录，重新检测”。在检测到登录态之前，Codex Mate 不会把“保持登录态”写成已启用。
-- “临时启用强制注入”会启用插件入口解锁和特殊插件强制安装。这个模式只改变 Codex Mate 的增强策略，不会主动覆盖 `auth.json` 里的登录态。
+- 如果还没登录 ChatGPT，Codex Mate 会先把第三方 API Key 写进 provider 的 `experimental_bearer_token`，并保留当前 `auth.json` 里的 API Key，避免提前打断纯 API 模式。
+- 等你登录 ChatGPT 后，Codex 官方登录会覆盖 `auth.json`。这时因为 API Key 已经提前写入 provider，移动端、Remote 和原生入口就可以继续优先使用官方登录态。
+- 如果已经检测到 ChatGPT 登录态，“保护官方登录”会移除 `auth.json` 里的 `OPENAI_API_KEY`，只保留 ChatGPT token，并让第三方 API Key 继续走 provider。
+- “仅使用兼容模式”会启用插件入口解锁和特殊插件强制安装。这个模式只改变 Codex Mate 的增强策略，不会主动覆盖 `auth.json` 里的登录态，也不承诺保留移动端或 Remote 入口。
 
-增强模式的选择会写入 `~/.codex-mate/settings.json`，不是只存在当前页面里。
+官方登录态保护或兼容模式的选择会写入 `~/.codex-mate/settings.json`，不是只存在当前页面里。
 
 如果需要手动精确切换 provider 文件，也可以使用下面的命令。
 
@@ -545,9 +545,7 @@ python -m codex_mate logs
 
 ### Codex Mate 菜单没有出现
 
-优先确认你是从 Codex Mate 入口启动的。
-
-Windows 推荐从桌面 `Codex Mate.lnk` 打开。macOS 可以从 `/Applications/Codex Mate.app` 打开。
+Windows 推荐从桌面 `Codex Mate.lnk` 打开。macOS 继续打开原生 Codex，Codex Mate 会通过 LaunchAgent 和 watcher 自动接管。
 
 也可以运行：
 

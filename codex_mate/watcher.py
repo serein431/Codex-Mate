@@ -16,11 +16,13 @@ from codex_mate.cdp import list_targets
 
 WATCHER_INTERVAL_SECONDS = 1.0
 TAKEOVER_GRACE_SECONDS = 1.0
+MACOS_TAKEOVER_GRACE_SECONDS = 5.0
 CDP_PROBE_TIMEOUT_SECONDS = 0.5
-CDP_WAIT_TIMEOUT_SECONDS = 45.0
+CDP_WAIT_TIMEOUT_SECONDS = 75.0
 HELPER_WAIT_TIMEOUT_SECONDS = 8.0
 KILL_WAIT_TIMEOUT_SECONDS = 8.0
 TAKEOVER_FAILURE_BACKOFF_SECONDS = 30.0
+MACOS_TAKEOVER_FAILURE_BACKOFF_SECONDS = 120.0
 TAKEOVER_SUCCESS_COOLDOWN_SECONDS = 15.0
 DEFAULT_HELPER_PORT = 57321
 SUPPORTED_PLATFORMS = {"win32", "darwin"}
@@ -106,6 +108,18 @@ def cdp_listening(port: int) -> bool:
 
 def helper_listening(port: int) -> bool:
     return cdp_listening(port)
+
+
+def takeover_grace_seconds() -> float:
+    return MACOS_TAKEOVER_GRACE_SECONDS if sys.platform == "darwin" else TAKEOVER_GRACE_SECONDS
+
+
+def takeover_failure_backoff_seconds() -> float:
+    return MACOS_TAKEOVER_FAILURE_BACKOFF_SECONDS if sys.platform == "darwin" else TAKEOVER_FAILURE_BACKOFF_SECONDS
+
+
+def should_sync_history_during_takeover() -> bool:
+    return True
 
 
 def cdp_ready(port: int) -> bool:
@@ -435,7 +449,10 @@ def takeover(debug_port: int, app_dir: Path | None = None) -> bool:
         log("takeover: codex processes did not exit in time, aborting this attempt")
         return False
 
-    sync_history_before_takeover()
+    if should_sync_history_during_takeover():
+        sync_history_before_takeover()
+    else:
+        log("takeover: skipping blocking history sync on macOS startup path")
 
     # Step 4: Give AppX activation machinery a moment to reset the "app is running" state.
     time.sleep(1.5)
@@ -545,7 +562,8 @@ def watch_loop(debug_port: int = 9229, helper_port: int = DEFAULT_HELPER_PORT) -
                     time.sleep(WATCHER_INTERVAL_SECONDS)
                     continue
 
-                if now - candidate_since < TAKEOVER_GRACE_SECONDS:
+                grace_seconds = takeover_grace_seconds()
+                if now - candidate_since < grace_seconds:
                     if last_state != "grace":
                         log(f"waiting for Codex CDP grace period (pids={codex_pids})")
                     last_state = "grace"
@@ -564,7 +582,7 @@ def watch_loop(debug_port: int = 9229, helper_port: int = DEFAULT_HELPER_PORT) -
                     cooldown_until = time.time() + TAKEOVER_SUCCESS_COOLDOWN_SECONDS
                     last_state = "cdp_ok"
                 else:
-                    backoff_until = time.time() + TAKEOVER_FAILURE_BACKOFF_SECONDS
+                    backoff_until = time.time() + takeover_failure_backoff_seconds()
                     last_state = "failed"
             except Exception as exc:
                 log("watch loop error: " + "".join(traceback.format_exception(type(exc), exc, exc.__traceback__)))

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from codex_mate import autostart
 from codex_mate import watcher
-from codex_mate.macos_installer import install_macos_app, uninstall_macos_app
+from codex_mate.macos_installer import remove_macos_app_shortcut, uninstall_macos_app
 from codex_mate.windows_installer import install_windows_shortcuts, uninstall_windows_shortcuts
 
 
@@ -20,7 +20,7 @@ class InstallOptions:
 
 def install_codex_mate(options: InstallOptions) -> None:
     if sys.platform == "darwin":
-        install_macos_app(options)
+        remove_macos_app_shortcut(options)
         watcher.enable_watcher()
         autostart.install_watcher_autostart(debug_port=9229)
         return

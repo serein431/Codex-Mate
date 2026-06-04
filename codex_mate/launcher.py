@@ -243,6 +243,10 @@ def build_codex_arguments(debug_port: int) -> list[str]:
     ]
 
 
+def build_macos_open_command(app_dir: Path, debug_port: int) -> list[str]:
+    return ["open", "-W", "-a", str(app_dir), "--args", *build_codex_arguments(debug_port)]
+
+
 def build_codex_executable(app_dir: Path) -> Path:
     if app_dir.suffix == ".app":
         return app_dir / "Contents" / "MacOS" / "Codex"
@@ -350,8 +354,7 @@ def activate_packaged_app(app_user_model_id: str, arguments: str) -> int:
 def launch_codex_app(app_dir: Path, debug_port: int) -> Any:
     if app_dir.suffix == ".app":
         prepare_macos_codex_relaunch(debug_port)
-        subprocess.run(["open", str(app_dir), "--args", *build_codex_arguments(debug_port)], check=True)
-        return None
+        return subprocess.Popen(build_macos_open_command(app_dir, debug_port), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     command = build_codex_command(app_dir, debug_port)
     app_user_model_id = packaged_app_user_model_id(app_dir) if sys.platform == "win32" else None
     if app_user_model_id:
@@ -413,10 +416,10 @@ def wait_until_windows_codex_stops(timeout: float = 8.0) -> bool:
     return not find_windows_codex_processes()
 
 
-def prepare_windows_codex_relaunch(debug_port: int) -> None:
+def prepare_windows_codex_relaunch(debug_port: int, *, force_restart: bool = False) -> None:
     if sys.platform != "win32":
         return
-    if devtools_json_ready(debug_port):
+    if not force_restart and devtools_json_ready(debug_port):
         return
     pids = find_windows_codex_processes()
     if not pids:
@@ -485,10 +488,10 @@ def wait_until_macos_codex_stops(timeout: float = 8.0) -> bool:
     return not find_macos_codex_processes()
 
 
-def prepare_macos_codex_relaunch(debug_port: int) -> None:
+def prepare_macos_codex_relaunch(debug_port: int, *, force_restart: bool = False) -> None:
     if sys.platform != "darwin":
         return
-    if cdp_port_ready(debug_port):
+    if not force_restart and cdp_port_ready(debug_port):
         return
     pids = find_macos_codex_processes()
     if not pids:
@@ -513,7 +516,19 @@ def shutdown_helper(server: HelperServer) -> None:
     server.server_close()
 
 
-def inject_with_retry(debug_port: int, script_path: Path, helper_port: int, service: ApiFirstDeleteService, attempts: int = 20, delay: float = 0.5) -> Any:
+def native_feature_result_requires_restart(result: dict[str, object] | None) -> bool:
+    return isinstance(result, dict) and result.get("status") == "updated"
+
+
+def restart_running_codex_for_native_feature_change(debug_port: int) -> None:
+    if sys.platform == "win32":
+        prepare_windows_codex_relaunch(debug_port, force_restart=True)
+        return
+    if sys.platform == "darwin":
+        prepare_macos_codex_relaunch(debug_port, force_restart=True)
+
+
+def inject_with_retry(debug_port: int, script_path: Path, helper_port: int, service: ApiFirstDeleteService, attempts: int = 120, delay: float = 0.5) -> Any:
     last_error: Exception | None = None
     for _ in range(attempts):
         try:
@@ -536,6 +551,27 @@ def launch_and_inject(app_dir: Path | None, db_path: Path | None, backup_dir: Pa
     debug_port = select_windows_loopback_port(debug_port)
     helper_port = select_windows_loopback_port(helper_port)
     prepare_windows_codex_relaunch(debug_port)
+    native_feature_results: list[dict[str, object]] = []
+    try:
+        native_feature_results.append(native_features.ensure_bundled_plugin_marketplace_cache(app_dir=resolved_app_dir))
+    except Exception as exc:
+        try:
+            from codex_mate import watcher
+
+            watcher.log(f"bundled plugin cache sync skipped: {exc}")
+        except Exception:
+            pass
+    try:
+        native_feature_results.append(native_features.ensure_curated_plugin_marketplace_registered())
+    except Exception as exc:
+        try:
+            from codex_mate import watcher
+
+            watcher.log(f"curated plugin marketplace registration skipped: {exc}")
+        except Exception:
+            pass
+    if any(native_feature_result_requires_restart(result) for result in native_feature_results) and cdp_port_ready(debug_port):
+        restart_running_codex_for_native_feature_change(debug_port)
     service = ApiFirstDeleteService(UnavailableApiAdapter(), db_path, backup_dir)
     server = start_helper(service, port=helper_port)
     codex_proc = None
