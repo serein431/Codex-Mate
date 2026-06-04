@@ -260,7 +260,7 @@ def test_ensure_remote_feature_flags_preserves_valid_toml_without_final_newline(
     assert native_features.read_config(config_path)["features"]["local_remote_dropdown"] is True
 
 
-def test_ensure_login_preserving_provider_moves_api_key_out_of_auth(tmp_path):
+def test_ensure_login_preserving_provider_copies_api_key_without_rewriting_auth(tmp_path):
     codex_home = tmp_path / ".codex"
     codex_home.mkdir()
     auth_path = codex_home / "auth.json"
@@ -293,9 +293,9 @@ def test_ensure_login_preserving_provider_moves_api_key_out_of_auth(tmp_path):
     assert "OPENAI_API_KEY" not in config
     assert auth["auth_mode"] == "chatgpt"
     assert auth["tokens"]["access_token"] == "tok"
-    assert "OPENAI_API_KEY" not in auth
+    assert auth["OPENAI_API_KEY"] == "sk-auth"
     assert Path(payload["config_backup_path"]).exists()
-    assert Path(payload["auth_backup_path"]).exists()
+    assert payload["auth_backup_path"] == ""
 
 
 def test_ensure_login_preserving_provider_prepares_api_key_before_chatgpt_login(tmp_path):
@@ -376,7 +376,7 @@ def test_apply_mixed_api_provider_mode_prepares_config_before_chatgpt_login(tmp_
     assert native_features.read_json_object(codex_home / "auth.json")["OPENAI_API_KEY"] == "sk-old"
 
 
-def test_apply_mixed_api_provider_mode_writes_config_without_auth_api_key(tmp_path):
+def test_apply_mixed_api_provider_mode_writes_config_without_rewriting_auth(tmp_path):
     codex_home = tmp_path / ".codex"
     codex_home.mkdir()
     auth_path = codex_home / "auth.json"
@@ -405,7 +405,7 @@ def test_apply_mixed_api_provider_mode_writes_config_without_auth_api_key(tmp_pa
     assert provider["experimental_bearer_token"] == "sk-new"
     assert auth["auth_mode"] == "chatgpt"
     assert auth["tokens"]["id_token"] == "tok"
-    assert "OPENAI_API_KEY" not in auth
+    assert auth["OPENAI_API_KEY"] == "sk-old"
 
 
 def test_apply_pure_api_provider_mode_writes_full_api_auth(tmp_path):
@@ -467,12 +467,14 @@ def test_apply_provider_profile_mixed_api_saves_profile_and_login_preserving_mod
     assert payload["status"] == "updated"
     assert payload["profile"]["api_key_present"] is True
     assert "api_key" not in payload["profile"]
-    assert payload["auth_enhancement_mode"] == "loginPreserving"
+    assert payload["auth_enhancement_mode"] == "forceInject"
+    assert payload["desired_auth_enhancement_mode"] == "loginPreserving"
     assert config["model_provider"] == "jmrai"
     assert config["model"] == "gpt-5.5"
     assert provider["requires_openai_auth"] is True
     assert provider["experimental_bearer_token"] == "sk-new"
-    assert "OPENAI_API_KEY" not in auth
+    assert auth["OPENAI_API_KEY"] == "sk-old"
+    assert "覆盖后可启用" in payload["message"]
     assert settings["auth_enhancement_mode"] == "loginPreserving"
     assert settings["provider_profile"]["api_key"] == "sk-new"
 
@@ -507,7 +509,7 @@ def test_apply_provider_profile_mixed_api_prepares_before_chatgpt_login(tmp_path
     assert payload["auth_enhancement_mode"] == "forceInject"
     assert payload["desired_auth_enhancement_mode"] == "loginPreserving"
     assert payload["provider_api_ready"] is True
-    assert "登录后" in payload["message"]
+    assert "覆盖后可启用" in payload["message"]
     assert auth["OPENAI_API_KEY"] == "sk-old"
     assert provider["experimental_bearer_token"] == "sk-new"
     assert settings["auth_enhancement_mode"] == "loginPreserving"
@@ -588,7 +590,7 @@ def test_apply_cc_switch_provider_uses_mixed_api_when_chatgpt_login_exists(tmp_p
     ccs_home = tmp_path / ".cc-switch"
     codex_home.mkdir()
     (codex_home / "auth.json").write_text(
-        '{"auth_mode":"chatgpt","OPENAI_API_KEY":"sk-old","tokens":{"refresh_token":"tok"}}\n',
+        '{"auth_mode":"chatgpt","tokens":{"refresh_token":"tok"}}\n',
         encoding="utf-8",
     )
     config = (
@@ -620,7 +622,7 @@ def test_apply_cc_switch_provider_uses_mixed_api_when_chatgpt_login_exists(tmp_p
     assert config_data["model_provider"] == "custom"
     assert config_data["model"] == "gpt-5.5"
     assert config_data["model_providers"]["custom"]["experimental_bearer_token"] == "sk-new"
-    assert "OPENAI_API_KEY" not in auth
+    assert auth == {"auth_mode": "chatgpt", "tokens": {"refresh_token": "tok"}}
     assert history_calls == [("paths", codex_home)]
     assert json.loads((ccs_home / "settings.json").read_text(encoding="utf-8"))["currentProviderCodex"] == "p1"
 
@@ -834,11 +836,12 @@ def test_set_auth_enhancement_mode_login_preserving_migrates_provider_when_possi
     auth = native_features.read_json_object(auth_path)
     provider = config["model_providers"]["custom"]
     assert payload["status"] == "updated"
-    assert payload["auth_enhancement_mode"] == "loginPreserving"
+    assert payload["auth_enhancement_mode"] == "forceInject"
+    assert payload["desired_auth_enhancement_mode"] == "loginPreserving"
     assert payload["provider_action"]["status"] == "updated"
     assert provider["requires_openai_auth"] is True
     assert provider["experimental_bearer_token"] == "sk-auth"
-    assert "OPENAI_API_KEY" not in auth
+    assert auth["OPENAI_API_KEY"] == "sk-auth"
 
 
 def test_set_auth_enhancement_mode_reuses_saved_provider_key_when_live_key_is_missing(tmp_path):
@@ -882,7 +885,7 @@ def test_set_auth_enhancement_mode_reuses_saved_provider_key_when_live_key_is_mi
     assert config["model"] == "gpt-5.5"
 
 
-def test_login_preserving_mode_recovers_chatgpt_auth_mode_when_tokens_survive_api_switch(tmp_path):
+def test_login_preserving_mode_preserves_auth_json_when_tokens_survive_api_switch(tmp_path):
     codex_home = tmp_path / ".codex"
     settings_home = tmp_path / ".codex-mate"
     codex_home.mkdir()
@@ -913,9 +916,9 @@ def test_login_preserving_mode_recovers_chatgpt_auth_mode_when_tokens_survive_ap
     provider = config["model_providers"]["custom"]
     assert payload["status"] == "updated"
     assert payload["provider_action"]["status"] == "updated"
-    assert auth["auth_mode"] == "chatgpt"
+    assert auth["auth_mode"] == "apikey"
     assert auth["tokens"]["refresh_token"] == "tok"
-    assert "OPENAI_API_KEY" not in auth
+    assert auth["OPENAI_API_KEY"] == "sk-auth"
     assert provider["experimental_bearer_token"] == "sk-auth"
 
 

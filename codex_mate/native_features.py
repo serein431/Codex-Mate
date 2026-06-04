@@ -573,10 +573,8 @@ def ensure_login_preserving_provider(
         wire_api=first_non_empty_string(provider.get("wire_api"), saved_profile_string(saved_profile, "wire_api", "wireApi")) or "responses",
         model=first_non_empty_string(config.get("model"), saved_profile_string(saved_profile, "model")),
     )
-    auth_updated = without_openai_api_key(auth) if login_ready else None
-    auth_changed = auth_updated is not None and auth_updated != dict(auth or {})
     config_changed = updated_config != config_text
-    if not config_changed and not auth_changed:
+    if not config_changed:
         return {
             "status": "skipped",
             "reason": "login-preserving provider already enabled"
@@ -588,11 +586,8 @@ def ensure_login_preserving_provider(
         }
 
     config_backup_path = backup_config(config_path, "login-preserving-provider") if config_changed else None
-    auth_backup_path = backup_auth(auth_path) if auth_changed and auth_path.exists() else None
     if config_changed:
         config_path.write_text(updated_config, encoding="utf-8")
-    if auth_changed and auth_updated is not None:
-        auth_path.write_text(json.dumps(auth_updated, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return {
         "status": "updated",
         "reason": "login-preserving provider enabled" if login_ready else "login-preserving provider prepared; waiting for ChatGPT login",
@@ -600,7 +595,7 @@ def ensure_login_preserving_provider(
         "auth_path": str(auth_path),
         "provider": provider_name,
         "config_backup_path": str(config_backup_path) if config_backup_path else "",
-        "auth_backup_path": str(auth_backup_path) if auth_backup_path else "",
+        "auth_backup_path": "",
     }
 
 
@@ -769,10 +764,13 @@ def auth_enhancement_message(
 ) -> str:
     login_ready = provider_status.get("chatgpt_login_token_present") is True
     provider_ready = (preparation_status or {}).get("ready") is True
+    auth_api_key_present = provider_status.get("auth_openai_api_key_present") is True
     if desired_mode == "loginPreserving" and not login_ready:
         if provider_ready:
             return "第三方 API Key 已保存到 provider。现在登录 ChatGPT，登录后点“重新检测”即可启用官方登录态保护。"
         return "请先在供应商配置或 CC Switch 中保存第三方 API Key，再登录 ChatGPT。"
+    if desired_mode == "loginPreserving" and auth_api_key_present:
+        return "第三方 API Key 已保存到 provider；auth.json 中仍有 OPENAI_API_KEY，登录 ChatGPT 覆盖后可启用官方登录态保护。"
     if mode == "forceInject":
         return "兼容模式已启用：Codex Mate 会用前端注入补齐插件入口，不会保护移动端或 Remote 登录态。"
     action_status = str((provider_action or {}).get("status") or "")
@@ -819,6 +817,11 @@ def auth_enhancement_status_text(
         return (
             "先保存第三方 API Key",
             "ChatGPT 登录会覆盖 auth.json 里的 API Key。请先把 API Key 写入 provider，再登录 ChatGPT。",
+        )
+    if desired_mode == "loginPreserving" and provider_status.get("auth_openai_api_key_present") is True:
+        return (
+            "API Key 已保存，等待官方登录覆盖 auth.json",
+            "第三方 API Key 已放进 provider；auth.json 中仍有 OPENAI_API_KEY，登录 ChatGPT 覆盖后即可启用移动端、Remote 和原生入口。",
         )
     if mode == "loginPreserving":
         return (
@@ -1007,7 +1010,10 @@ def apply_provider_profile(
     overall_status = "failed" if action_failed else ("updated" if action.get("status") == "updated" else "skipped")
     message = provider_profile_apply_message(normalized, action, action_failed)
     if not action_failed and target_auth_mode == "loginPreserving" and status["auth_enhancement_mode"] != "loginPreserving":
-        message = "供应商配置已保存；当前未检测到 ChatGPT 登录态，登录后可启用保留登录态。"
+        if provider_status.get("auth_openai_api_key_present") is True:
+            message = "供应商配置已保存；auth.json 中仍有 OPENAI_API_KEY，登录 ChatGPT 覆盖后可启用保留登录态。"
+        else:
+            message = "供应商配置已保存；当前未检测到 ChatGPT 登录态，登录后可启用保留登录态。"
     return {
         **status,
         "status": overall_status,
@@ -1301,8 +1307,6 @@ def apply_mixed_api_provider_mode(
 ) -> dict[str, object]:
     config_path = config_path_for(codex_home)
     auth_path = config_path.parent / "auth.json"
-    auth = read_json_object(auth_path)
-    auth_payload = without_openai_api_key(auth) if chatgpt_auth_has_login_token(auth) else None
     return apply_provider_config_with_auth_payload(
         config_path=config_path,
         auth_path=auth_path,
@@ -1312,7 +1316,7 @@ def apply_mixed_api_provider_mode(
         api_key=api_key,
         wire_api=wire_api,
         model=model,
-        auth_payload=auth_payload,
+        auth_payload=None,
         auth_backup_label="provider-mode-mixed-api",
     )
 

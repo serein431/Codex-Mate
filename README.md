@@ -337,7 +337,7 @@ Codex Mate 把 provider 分成三种明确模式：
 
 - 如果还没登录 ChatGPT，Codex Mate 会先把第三方 API Key 写进 provider 的 `experimental_bearer_token`，并保留当前 `auth.json` 里的 API Key，避免提前打断纯 API 模式。
 - 等你登录 ChatGPT 后，Codex 官方登录会覆盖 `auth.json`。这时因为 API Key 已经提前写入 provider，移动端、Remote 和原生入口就可以继续优先使用官方登录态。
-- 如果已经检测到 ChatGPT 登录态，“保护官方登录”会移除 `auth.json` 里的 `OPENAI_API_KEY`，只保留 ChatGPT token，并让第三方 API Key 继续走 provider。
+- 如果已经检测到 ChatGPT 登录态，“保护官方登录”不会把第三方 API Key 写进 `auth.json`，只会把它写到当前 provider 的 `experimental_bearer_token`。`auth.json` 继续承担官方登录缓存的职责。
 - “仅使用兼容模式”会启用插件入口解锁和特殊插件强制安装。这个模式只改变 Codex Mate 的增强策略，不会主动覆盖 `auth.json` 里的登录态，也不承诺保留移动端或 Remote 入口。
 
 官方登录态保护或兼容模式的选择会写入 `~/.codex-mate/settings.json`，不是只存在当前页面里。
@@ -380,7 +380,9 @@ base_url = "https://example.com/v1"
 experimental_bearer_token = "sk-..."
 ```
 
-API Key 会进入当前 provider 的 `experimental_bearer_token`，`auth.json` 里的 ChatGPT token 会保留，`OPENAI_API_KEY` 会被移出。修改前会备份 `config.toml` 和 `auth.json`。
+API Key 会进入当前 provider 的 `experimental_bearer_token`。`mixed-api` 不会写入或清理 `auth.json`；`auth.json` 继续保留官方 ChatGPT / Codex 登录缓存。修改前会备份 `config.toml`。
+
+开启保留登录态后，Codex 里显示的仍然是官方账号，这是正常现象。模型请求是否走第三方，以 `config.toml` 当前 `model_provider`、CC Switch 当前供应商和本地路由日志为准，不要只看 Codex 账号信息判断计费方。
 
 纯 API 模式：
 
@@ -398,7 +400,7 @@ python -m codex_mate provider-mode pure-api \
 
 如果你已经使用 CC Switch 管理 Codex 供应商，CM 面板会在“供应商配置”上方显示“CC Switch 速切”。
 
-Codex Mate 会直接读取本机 `~/.cc-switch/cc-switch.db` 里的 `app_type = "codex"` 供应商，展示名称、当前启用状态、模式、Base URL、Wire API 和 API Key 是否存在。点击“切换”后，Codex Mate 会把对应供应商写入当前 Codex 的 `config.toml` / `auth.json`，同步 CC Switch 的当前供应商状态，并顺手触发一次轻量历史同步。
+Codex Mate 会直接读取本机 `~/.cc-switch/cc-switch.db` 里的 `app_type = "codex"` 供应商，展示名称、当前启用状态、模式、Base URL、Wire API 和 API Key 是否存在。点击“切换”后，Codex Mate 会按当前模式写入 Codex 配置：保留官方登录态时只更新 `config.toml` 里的当前 provider；纯 API 兼容模式才会写入 `auth.json`。切换成功后会同步 CC Switch 的当前供应商状态，并顺手触发一次轻量历史同步。
 
 如果没有安装 CC Switch、数据库不存在，或还没有 Codex 供应商，面板会显示空状态，不会卡住 Codex。
 
