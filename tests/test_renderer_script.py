@@ -610,8 +610,11 @@ def test_renderer_script_adds_backend_status_contract():
     assert 'postJson("/backend/status", {})' in text
     assert "后端已连接" in text
     assert "function httpPostJson(path, payload)" in text
+    assert "function helperHttpFallbackAllowed" in text
+    assert "function bridgeUnavailableResult" in text
     assert "Codex Mate bridge timeout" in text
     assert "return await httpPostJson(path, payload)" in text
+    assert 'return !/^app:/i.test(String(window.location?.protocol || ""))' in text
 
 
 def test_renderer_script_keeps_codex_mate_modal_contained_and_closable():
@@ -658,7 +661,7 @@ def test_renderer_script_does_not_include_fast_mode_patch():
     assert "https://github.com/serein431/Codex-Mate/issues" in text
     assert "window.open(issueUrl, \"_blank\")" in text
     assert "Codex Mate 桥接超时，请重新打开 Codex 或从 Codex Mate 启动器重新接管。" in text
-    assert "window.__codexMateBridgeDisabledUntil = Date.now() + 10000" in text
+    assert "if (helperHttpFallbackAllowed()) window.__codexMateBridgeDisabledUntil = Date.now() + 10000" in text
     assert "官方登录态保护" in text
     assert "保护官方登录" in text
     assert "当前状态" in text

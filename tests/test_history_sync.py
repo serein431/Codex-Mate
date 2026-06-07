@@ -390,6 +390,38 @@ def test_sync_history_skips_locked_session_files_without_aborting(tmp_path, monk
     assert payload["model_provider"] == "current_provider"
 
 
+def test_sync_history_updates_session_meta_beyond_first_line(tmp_path):
+    home = tmp_path / ".codex"
+    write_config(home)
+    create_threads_db(home)
+    session_path = write_session_file(home, "old-thread", "old_provider", "gpt-old")
+    session_path.write_text(
+        json.dumps({"timestamp": "2026-01-01T00:00:00.000Z", "type": "event_msg", "payload": {"type": "started"}})
+        + "\n"
+        + json.dumps(
+            {
+                "timestamp": "2026-01-01T00:00:01.000Z",
+                "type": "session_meta",
+                "payload": {"id": "old-thread", "model_provider": "old_provider", "model": "gpt-old"},
+            }
+        )
+        + "\n"
+        + json.dumps({"timestamp": "2026-01-01T00:00:02.000Z", "type": "event_msg", "payload": {"type": "token_count"}})
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = history_sync.sync_history_to_current_profile(history_sync.resolve_paths(home))
+
+    assert result["updated_session_files"] == 1
+    lines = session_path.read_text(encoding="utf-8").splitlines()
+    assert json.loads(lines[0])["type"] == "event_msg"
+    payload = json.loads(lines[1])["payload"]
+    assert payload["model_provider"] == "current_provider"
+    assert payload["model"] == "gpt-current"
+    assert json.loads(lines[2])["type"] == "event_msg"
+
+
 def test_sync_history_to_current_profile_preserves_session_meta_timestamp_when_repairing_sidecars(tmp_path):
     home = tmp_path / ".codex"
     write_config(home)

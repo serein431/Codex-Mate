@@ -24,6 +24,7 @@ KILL_WAIT_TIMEOUT_SECONDS = 8.0
 TAKEOVER_FAILURE_BACKOFF_SECONDS = 30.0
 MACOS_TAKEOVER_FAILURE_BACKOFF_SECONDS = 120.0
 TAKEOVER_SUCCESS_COOLDOWN_SECONDS = 15.0
+WATCHER_HISTORY_CHECK_INTERVAL_SECONDS = 30.0
 DEFAULT_HELPER_PORT = 57321
 SUPPORTED_PLATFORMS = {"win32", "darwin"}
 
@@ -363,19 +364,25 @@ def launcher_command_available() -> bool:
     return True
 
 
-def sync_history_before_takeover() -> None:
+def sync_history_for_watcher(context: str, *, log_skipped: bool = False) -> None:
     try:
         result = history_sync.sync_history_if_ready(history_sync.resolve_paths())
     except Exception as exc:
-        log(f"history sync before takeover failed: {exc}")
+        log(f"history sync {context} failed: {exc}")
         return
     if result.get("skipped"):
+        if log_skipped:
+            log(f"history check {context} skipped: {result.get('reason')}")
         return
     changed = int(result.get("updated_database_rows", 0)) + int(result.get("updated_session_files", 0))
     log(
-        "history synced before takeover "
+        f"history synced {context} "
         f"(database rows={result.get('updated_database_rows')}, session files={result.get('updated_session_files')}, changed={changed})"
     )
+
+
+def sync_history_before_takeover() -> None:
+    sync_history_for_watcher("before takeover")
 
 
 def attach_to_running_codex(helper_port: int = DEFAULT_HELPER_PORT) -> bool:
@@ -489,6 +496,7 @@ def watch_loop(debug_port: int = 9229, helper_port: int = DEFAULT_HELPER_PORT) -
     last_state = None
     backoff_until = 0.0
     cooldown_until = 0.0
+    next_history_check_at = 0.0
     candidate_pids: tuple[int, ...] | None = None
     candidate_since = 0.0
 
@@ -504,6 +512,10 @@ def watch_loop(debug_port: int = 9229, helper_port: int = DEFAULT_HELPER_PORT) -
 
                 if cdp_ready(debug_port):
                     if helper_listening(helper_port):
+                        now = time.time()
+                        if now >= next_history_check_at:
+                            sync_history_for_watcher("while CDP/helper are up", log_skipped=last_state != "cdp_helper_ok")
+                            next_history_check_at = now + WATCHER_HISTORY_CHECK_INTERVAL_SECONDS
                         if last_state != "cdp_helper_ok":
                             log("CDP and helper are up")
                         last_state = "cdp_helper_ok"

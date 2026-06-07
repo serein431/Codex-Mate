@@ -120,6 +120,29 @@ def test_watch_loop_runs_on_macos_until_keyboard_interrupt(monkeypatch, tmp_path
     assert watcher.watch_loop() == 0
 
 
+def test_watch_loop_checks_history_when_cdp_and_helper_are_up(monkeypatch, tmp_path):
+    events = []
+    monkeypatch.setattr(watcher, "data_root", lambda: tmp_path)
+    monkeypatch.setattr(watcher.sys, "platform", "darwin")
+    monkeypatch.setattr(watcher, "acquire_watcher_lock", lambda debug_port: object())
+    monkeypatch.setattr(watcher, "release_watcher_lock", lambda handle: None)
+    monkeypatch.setattr(watcher, "cdp_ready", lambda port: True)
+    monkeypatch.setattr(watcher, "helper_listening", lambda port: True)
+    monkeypatch.setattr(
+        watcher,
+        "sync_history_for_watcher",
+        lambda context, **kwargs: events.append(("sync-history", context, kwargs)),
+    )
+
+    def stop(_seconds):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(watcher.time, "sleep", stop)
+
+    assert watcher.watch_loop() == 0
+    assert events == [("sync-history", "while CDP/helper are up", {"log_skipped": True})]
+
+
 def test_macos_takeover_uses_longer_grace_and_backoff(monkeypatch):
     monkeypatch.setattr(watcher.sys, "platform", "darwin")
 

@@ -132,6 +132,13 @@ def split_first_line(text: str) -> tuple[str, str, str]:
     return text, "", ""
 
 
+def split_line_ending(line: str) -> tuple[str, str]:
+    for ending in ("\r\n", "\n", "\r"):
+        if line.endswith(ending):
+            return line[: -len(ending)], ending
+    return line, ""
+
+
 def atomic_write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temp = path.with_name(f".{path.name}.codex-mate-{time.time_ns()}.tmp")
@@ -225,29 +232,41 @@ def update_session_files(paths: HistoryPaths, profile: CurrentProfile) -> dict[s
         except OSError as exc:
             skipped.append(f"{path}: {exc}")
             continue
-        first_line, ending, remainder = split_first_line(text)
-        if not first_line:
+        lines = text.splitlines(keepends=True)
+        new_lines: list[str] = []
+        file_changed = False
+        for line in lines:
+            content, ending = split_line_ending(line)
+            if not content:
+                new_lines.append(line)
+                continue
+            try:
+                item = json.loads(content)
+            except json.JSONDecodeError:
+                new_lines.append(line)
+                continue
+            if item.get("type") != "session_meta":
+                new_lines.append(line)
+                continue
+            payload = item.get("payload")
+            if not isinstance(payload, dict):
+                new_lines.append(line)
+                continue
+            current_provider = str(payload.get("model_provider") or "")
+            current_model = str(payload.get("model") or "") if payload.get("model") else None
+            model_matches = profile.model is None or current_model == profile.model
+            if current_provider == profile.provider and model_matches:
+                new_lines.append(line)
+                continue
+            payload["model_provider"] = profile.provider
+            if profile.model:
+                payload["model"] = profile.model
+            new_lines.append(json.dumps(item, ensure_ascii=False, separators=(",", ":")) + ending)
+            file_changed = True
+        if not file_changed:
             continue
         try:
-            item = json.loads(first_line)
-        except json.JSONDecodeError:
-            continue
-        if item.get("type") != "session_meta":
-            continue
-        payload = item.get("payload")
-        if not isinstance(payload, dict):
-            continue
-        current_provider = str(payload.get("model_provider") or "")
-        current_model = str(payload.get("model") or "") if payload.get("model") else None
-        model_matches = profile.model is None or current_model == profile.model
-        if current_provider == profile.provider and model_matches:
-            continue
-        payload["model_provider"] = profile.provider
-        if profile.model:
-            payload["model"] = profile.model
-        new_first = json.dumps(item, ensure_ascii=False, separators=(",", ":"))
-        try:
-            atomic_write_text(path, new_first + (ending + remainder if ending else "\n"))
+            atomic_write_text(path, "".join(new_lines))
         except OSError as exc:
             skipped.append(f"{path}: {exc}")
             continue

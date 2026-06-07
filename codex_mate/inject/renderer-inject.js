@@ -2920,11 +2920,20 @@
     }
   }
 
+  function helperHttpFallbackAllowed() {
+    return !/^app:/i.test(String(window.location?.protocol || ""));
+  }
+
+  function bridgeUnavailableResult() {
+    return { status: "failed", message: "bridge binding unavailable" };
+  }
+
   async function postJson(path, payload) {
-    if (Date.now() < Number(window.__codexMateBridgeDisabledUntil || 0)) {
+    if (helperHttpFallbackAllowed() && Date.now() < Number(window.__codexMateBridgeDisabledUntil || 0)) {
       return await httpPostJson(path, payload);
     }
     if (!window.__codexMateBridge) {
+      if (!helperHttpFallbackAllowed()) return bridgeUnavailableResult();
       return await httpPostJson(path, payload);
     }
     let bridgeFailure = null;
@@ -2936,9 +2945,10 @@
       bridgeFailure = result;
     } catch (error) {
       bridgeFailure = { status: "failed", message: error?.message || "Codex Mate bridge timeout" };
-      window.__codexMateBridgeDisabledUntil = Date.now() + 10000;
+      if (helperHttpFallbackAllowed()) window.__codexMateBridgeDisabledUntil = Date.now() + 10000;
       // Fall through to the HTTP helper when the in-page bridge is stale or wedged.
     }
+    if (!helperHttpFallbackAllowed()) return bridgeFailure || bridgeUnavailableResult();
     const httpResult = await httpPostJson(path, payload);
     if (
       bridgeFailure
