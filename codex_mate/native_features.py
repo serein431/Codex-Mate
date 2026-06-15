@@ -650,13 +650,29 @@ def login_preserving_preparation_status(
         provider_name = str(config.get("model_provider") or "openai").strip() or "openai"
         provider = provider_config(config, provider_name)
     saved_profile = saved_provider_profile_for(settings_home, provider_name)
+    auth_api_key = first_non_empty_string(auth.get("OPENAI_API_KEY") if auth else None)
+    config_api_key = first_non_empty_string(config.get("OPENAI_API_KEY") if config else None)
+    provider_bearer_token = first_non_empty_string(provider.get("experimental_bearer_token") if provider else None)
+    provider_api_key = first_non_empty_string(provider.get("api_key") if provider else None)
+    saved_api_key = saved_profile_string(saved_profile, "api_key", "apiKey")
     api_key = first_non_empty_string(
-        auth.get("OPENAI_API_KEY") if auth else None,
-        config.get("OPENAI_API_KEY") if config else None,
-        provider.get("experimental_bearer_token") if provider else None,
-        provider.get("api_key") if provider else None,
-        saved_profile_string(saved_profile, "api_key", "apiKey"),
+        provider_bearer_token,
+        provider_api_key,
+        saved_api_key,
+        config_api_key,
+        auth_api_key,
     )
+    api_key_source = ""
+    if provider_bearer_token:
+        api_key_source = "provider"
+    elif provider_api_key:
+        api_key_source = "provider_api_key"
+    elif saved_api_key:
+        api_key_source = "saved_profile"
+    elif config_api_key:
+        api_key_source = "config_root"
+    elif auth_api_key:
+        api_key_source = "auth_json"
     base_url = first_non_empty_string(
         provider.get("base_url") if provider else None,
         saved_profile_string(saved_profile, "base_url", "baseUrl"),
@@ -671,6 +687,7 @@ def login_preserving_preparation_status(
         and provider_has_bearer
         and provider_has_base_url
     )
+    needs_provider_write = provider_api_ready and not provider_config_ready
     missing: list[str] = []
     if provider_name in ("", "openai"):
         missing.append("provider")
@@ -681,8 +698,10 @@ def login_preserving_preparation_status(
     return {
         "ready": provider_api_ready,
         "provider_config_ready": provider_config_ready,
+        "needs_provider_write": needs_provider_write,
         "provider": provider_name,
         "api_key_present": bool(api_key),
+        "api_key_source": api_key_source,
         "base_url_present": bool(base_url),
         "provider_requires_openai_auth": provider_requires_auth,
         "provider_has_bearer_token": provider_has_bearer,
@@ -763,26 +782,34 @@ def auth_enhancement_message(
     desired_mode: str | None = None,
 ) -> str:
     login_ready = provider_status.get("chatgpt_login_token_present") is True
-    provider_ready = (preparation_status or {}).get("ready") is True
+    provider_api_ready = (preparation_status or {}).get("ready") is True
+    provider_config_ready = (preparation_status or {}).get("provider_config_ready") is True
+    needs_provider_write = (preparation_status or {}).get("needs_provider_write") is True
     auth_api_key_present = provider_status.get("auth_openai_api_key_present") is True
-    if desired_mode == "loginPreserving" and not login_ready:
-        if provider_ready:
-            return "第三方 API Key 已保存到 provider。现在登录 ChatGPT，登录后点“重新检测”即可启用官方登录态保护。"
-        return "请先在供应商配置或 CC Switch 中保存第三方 API Key，再登录 ChatGPT。"
-    if desired_mode == "loginPreserving" and auth_api_key_present:
-        return "第三方 API Key 已保存到 provider；auth.json 中仍有 OPENAI_API_KEY，登录 ChatGPT 覆盖后可启用官方登录态保护。"
-    if mode == "forceInject":
-        return "兼容模式已启用：Codex Mate 会用前端注入补齐插件入口，不会保护移动端或 Remote 登录态。"
     action_status = str((provider_action or {}).get("status") or "")
     action_reason = str((provider_action or {}).get("reason") or "")
+    if desired_mode == "loginPreserving" and not login_ready:
+        if action_status == "updated":
+            return "第三方 API Key 已先写入 provider。请现在登录 ChatGPT，登录时不会再丢掉 API Key。"
+        if provider_config_ready:
+            return "第三方 API Key 已写入 provider。现在登录 ChatGPT，登录后重新检测即可启用官方登录态保护。"
+        if provider_api_ready and needs_provider_write:
+            return "检测到第三方 API Key，但还没有写入 provider。请点击“保护官方登录”，写入完成后再登录 ChatGPT。"
+        return "请先在供应商配置或 CC Switch 中保存第三方 API Key，再登录 ChatGPT。"
+    if desired_mode == "loginPreserving" and auth_api_key_present:
+        if provider_config_ready:
+            return "第三方 API Key 已写入 provider；auth.json 中仍有 OPENAI_API_KEY，当前会按 API Key 模式判断。请重新登录 ChatGPT 或清理后再检测。"
+        return "API Key 还在 auth.json 中。请先点击“保护官方登录”，把 API Key 写入 provider 后再登录 ChatGPT。"
+    if mode == "forceInject":
+        return "兼容模式已启用：Codex Mate 会用前端注入补齐插件入口，不会保护移动端或 Remote 登录态。"
     if action_status == "updated":
         if login_ready:
             return "官方登录态保护已开启：第三方 API Key 已写入 provider，auth.json 会继续保留 ChatGPT 登录。"
-        return "第三方 API Key 已先写入 provider。请现在登录 ChatGPT，避免登录时覆盖掉 API Key。"
+        return "第三方 API Key 已先写入 provider。请现在登录 ChatGPT，登录时不会再丢掉 API Key。"
     if provider_status.get("mode") in ("official", "mixed-api"):
         return "官方登录态保护已开启：移动端、Remote 和原生入口会优先使用 ChatGPT 登录。"
     if action_reason == "chatgpt login token not found":
-        return "未检测到 ChatGPT 登录。请先确认第三方 API Key 已保存到 provider，再去 Codex 登录账号。"
+        return "未检测到 ChatGPT 登录。请先确认第三方 API Key 已写入 provider，再去 Codex 登录账号。"
     if action_reason == "provider api key missing":
         return "还不能准备官方登录态保护：当前 provider 缺少 API Key。请先在供应商配置里填写 API Key。"
     if action_reason == "provider base_url not found":
@@ -804,24 +831,37 @@ def auth_enhancement_status_text(
     login_ready = provider_status.get("chatgpt_login_token_present") is True
     provider_mode = str(provider_status.get("mode") or "unknown")
     provider = str(provider_status.get("provider") or "openai")
+    provider_api_ready = (preparation_status or {}).get("ready") is True
+    provider_config_ready = (preparation_status or {}).get("provider_config_ready") is True
+    needs_provider_write = (preparation_status or {}).get("needs_provider_write") is True
     if not login_ready:
-        if (preparation_status or {}).get("ready") is True:
+        if provider_config_ready:
             return (
-                "API Key 已保存，等待 ChatGPT 登录"
+                "API Key 已写入 provider，等待 ChatGPT 登录"
                 if desired_mode == "loginPreserving"
-                else "API Key 已保存，当前为兼容模式",
-                "第三方 API Key 已放进 provider；现在去 Codex 登录 ChatGPT，登录完成后重新检测即可启用移动端、Remote 和原生入口。"
+                else "API Key 已写入 provider，当前为兼容模式",
+                "现在去 Codex 登录 ChatGPT，登录完成后重新检测即可启用移动端、Remote 和原生入口。"
                 if desired_mode == "loginPreserving"
                 else "如需移动端、Remote 和原生入口，请切到“保护官方登录”后再登录 ChatGPT。",
+            )
+        if provider_api_ready and needs_provider_write:
+            return (
+                "先把 API Key 写入 provider",
+                "检测到第三方 API Key 还没有写入 provider。请先点击“保护官方登录”，写入完成后再登录 ChatGPT。",
             )
         return (
             "先保存第三方 API Key",
             "ChatGPT 登录会覆盖 auth.json 里的 API Key。请先把 API Key 写入 provider，再登录 ChatGPT。",
         )
     if desired_mode == "loginPreserving" and provider_status.get("auth_openai_api_key_present") is True:
+        if provider_config_ready:
+            return (
+                "API Key 已写入 provider，auth.json 仍有 API Key",
+                "当前仍会按 API Key 模式判断。请重新登录 ChatGPT 或清理 auth.json 后再检测。",
+            )
         return (
-            "API Key 已保存，等待官方登录覆盖 auth.json",
-            "第三方 API Key 已放进 provider；auth.json 中仍有 OPENAI_API_KEY，登录 ChatGPT 覆盖后即可启用移动端、Remote 和原生入口。",
+            "先把 API Key 写入 provider",
+            "ChatGPT 登录材料已存在，但第三方 API Key 还没有写入 provider。请先点击“保护官方登录”。",
         )
     if mode == "loginPreserving":
         return (
@@ -1010,8 +1050,10 @@ def apply_provider_profile(
     overall_status = "failed" if action_failed else ("updated" if action.get("status") == "updated" else "skipped")
     message = provider_profile_apply_message(normalized, action, action_failed)
     if not action_failed and target_auth_mode == "loginPreserving" and status["auth_enhancement_mode"] != "loginPreserving":
-        if provider_status.get("auth_openai_api_key_present") is True:
-            message = "供应商配置已保存；auth.json 中仍有 OPENAI_API_KEY，登录 ChatGPT 覆盖后可启用保留登录态。"
+        if status.get("provider_config_ready") is True:
+            message = "供应商配置已保存；第三方 API Key 已写入 provider。登录 ChatGPT 后重新检测即可启用保留登录态。"
+        elif provider_status.get("auth_openai_api_key_present") is True:
+            message = "供应商配置已保存；API Key 还在 auth.json 中，请先把它写入 provider 后再登录 ChatGPT。"
         else:
             message = "供应商配置已保存；当前未检测到 ChatGPT 登录态，登录后可启用保留登录态。"
     return {

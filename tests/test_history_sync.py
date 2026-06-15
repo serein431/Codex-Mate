@@ -123,6 +123,23 @@ def write_session_file(home: Path, thread_id: str, provider: str, model: str) ->
     return path
 
 
+def write_legacy_session_file(home: Path, thread_id: str, provider: str | None = None, model: str | None = None) -> Path:
+    session_dir = home / "sessions" / "2026" / "01"
+    session_dir.mkdir(parents=True, exist_ok=True)
+    path = session_dir / f"rollout-2026-01-01T00-00-00-legacy-{thread_id}.jsonl"
+    first = {
+        "id": thread_id,
+        "timestamp": "2026-01-01T00:00:00.000Z",
+        "instructions": None,
+    }
+    if provider is not None:
+        first["model_provider"] = provider
+    if model is not None:
+        first["model"] = model
+    path.write_text(json.dumps(first) + "\n{\"type\":\"event_msg\",\"payload\":{}}\n", encoding="utf-8")
+    return path
+
+
 def test_sync_history_rehomes_database_sessions_and_index(tmp_path):
     home = tmp_path / ".codex"
     write_config(home)
@@ -452,6 +469,56 @@ def test_sync_history_to_current_profile_preserves_session_meta_timestamp_when_r
     first_line = json.loads(session_path.read_text(encoding="utf-8").splitlines()[0])
     assert first_line["timestamp"] == "2026-01-01T00:00:00.000Z"
     assert first_line["payload"]["timestamp"] == "2026-01-01T00:00:00.000Z"
+
+
+def test_sync_history_if_ready_repairs_mismatched_session_files_when_database_matches(tmp_path):
+    home = tmp_path / ".codex"
+    write_config(home)
+    create_current_threads_db(home)
+    session_path = write_session_file(home, "current-thread", "old_provider", "gpt-old")
+    paths = history_sync.resolve_paths(home)
+
+    result = history_sync.sync_history_if_ready(paths)
+
+    assert result["ok"] is True
+    assert result["skipped"] is False
+    assert result["updated_database_rows"] == 0
+    assert result["updated_session_files"] == 1
+    assert result["mismatched_session_files"] == 1
+    payload = json.loads(session_path.read_text(encoding="utf-8").splitlines()[0])["payload"]
+    assert payload["model_provider"] == "current_provider"
+    assert payload["model"] == "gpt-current"
+
+
+def test_sync_history_if_ready_repairs_legacy_session_metadata_when_database_matches(tmp_path):
+    home = tmp_path / ".codex"
+    write_config(home)
+    create_current_threads_db(home)
+    session_path = write_legacy_session_file(home, "current-thread", "old_provider", "gpt-old")
+    paths = history_sync.resolve_paths(home)
+
+    result = history_sync.sync_history_if_ready(paths)
+
+    assert result["ok"] is True
+    assert result["skipped"] is False
+    assert result["updated_database_rows"] == 0
+    assert result["updated_session_files"] == 1
+    first_line = json.loads(session_path.read_text(encoding="utf-8").splitlines()[0])
+    assert first_line["model_provider"] == "current_provider"
+    assert first_line["model"] == "gpt-current"
+
+
+def test_history_status_ignores_legacy_session_files_that_are_not_in_database(tmp_path):
+    home = tmp_path / ".codex"
+    write_config(home)
+    create_current_threads_db(home)
+    write_legacy_session_file(home, "current-thread", "old_provider", "gpt-old")
+    write_legacy_session_file(home, "orphan-thread", "old_provider", "gpt-old")
+    paths = history_sync.resolve_paths(home)
+
+    result = history_sync.status(paths)
+
+    assert result["mismatched_session_files"] == 1
 
 
 def test_sync_history_skips_when_codex_state_is_missing(tmp_path):

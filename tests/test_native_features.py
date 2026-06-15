@@ -469,12 +469,13 @@ def test_apply_provider_profile_mixed_api_saves_profile_and_login_preserving_mod
     assert "api_key" not in payload["profile"]
     assert payload["auth_enhancement_mode"] == "forceInject"
     assert payload["desired_auth_enhancement_mode"] == "loginPreserving"
+    assert payload["provider_config_ready"] is True
     assert config["model_provider"] == "jmrai"
     assert config["model"] == "gpt-5.5"
     assert provider["requires_openai_auth"] is True
     assert provider["experimental_bearer_token"] == "sk-new"
     assert auth["OPENAI_API_KEY"] == "sk-old"
-    assert "覆盖后可启用" in payload["message"]
+    assert "已写入 provider" in payload["message"]
     assert settings["auth_enhancement_mode"] == "loginPreserving"
     assert settings["provider_profile"]["api_key"] == "sk-new"
 
@@ -509,7 +510,8 @@ def test_apply_provider_profile_mixed_api_prepares_before_chatgpt_login(tmp_path
     assert payload["auth_enhancement_mode"] == "forceInject"
     assert payload["desired_auth_enhancement_mode"] == "loginPreserving"
     assert payload["provider_api_ready"] is True
-    assert "覆盖后可启用" in payload["message"]
+    assert payload["provider_config_ready"] is True
+    assert "已写入 provider" in payload["message"]
     assert auth["OPENAI_API_KEY"] == "sk-old"
     assert provider["experimental_bearer_token"] == "sk-new"
     assert settings["auth_enhancement_mode"] == "loginPreserving"
@@ -800,6 +802,35 @@ def test_auth_enhancement_mode_status_defaults_from_provider_mode(tmp_path):
     assert payload["settings_path"] == str(settings_home / "settings.json")
 
 
+def test_auth_enhancement_mode_status_does_not_treat_auth_json_key_as_provider_ready(tmp_path):
+    codex_home = tmp_path / ".codex"
+    settings_home = tmp_path / ".codex-mate"
+    codex_home.mkdir()
+    (codex_home / "auth.json").write_text(
+        '{"auth_mode":"apikey","OPENAI_API_KEY":"sk-auth"}\n',
+        encoding="utf-8",
+    )
+    (codex_home / "config.toml").write_text(
+        'model_provider = "custom"\n'
+        '[model_providers.custom]\n'
+        'name = "Custom"\n'
+        'base_url = "https://relay.example.test/v1"\n',
+        encoding="utf-8",
+    )
+
+    payload = native_features.auth_enhancement_mode_status(codex_home, settings_home=settings_home)
+
+    assert payload["status"] == "ok"
+    assert payload["auth_enhancement_mode"] == "forceInject"
+    assert payload["desired_auth_enhancement_mode"] == "loginPreserving"
+    assert payload["provider_api_ready"] is True
+    assert payload["provider_config_ready"] is False
+    assert payload["login_preserving_provider"]["api_key_source"] == "auth_json"
+    assert payload["login_preserving_provider"]["needs_provider_write"] is True
+    assert "写入 provider" in payload["summary"]
+    assert "已保存到 provider" not in payload["message"]
+
+
 def test_set_auth_enhancement_mode_persists_force_inject_without_rewriting_provider(tmp_path):
     codex_home = tmp_path / ".codex"
     settings_home = tmp_path / ".codex-mate"
@@ -998,7 +1029,8 @@ def test_set_auth_enhancement_mode_login_preserving_prepares_api_key_before_chat
     assert payload["desired_auth_enhancement_mode"] == "loginPreserving"
     assert payload["login_preserving_available"] is False
     assert payload["provider_api_ready"] is True
-    assert "API Key 已保存" in payload["message"]
+    assert payload["provider_config_ready"] is True
+    assert "已先写入 provider" in payload["message"]
     assert settings["auth_enhancement_mode"] == "loginPreserving"
     assert native_features.read_json_object(auth_path)["OPENAI_API_KEY"] == "sk-auth"
     assert provider["experimental_bearer_token"] == "sk-auth"

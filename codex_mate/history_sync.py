@@ -32,6 +32,14 @@ class CurrentProfile:
     model: str | None
 
 
+@dataclass(frozen=True)
+class SessionMetadata:
+    thread_id: str | None
+    provider: str | None
+    model: str | None
+    missing_provider: bool
+
+
 def resolve_paths(codex_home: str | Path | None = None) -> HistoryPaths:
     home = Path(codex_home).expanduser() if codex_home is not None else Path.home() / ".codex"
     return HistoryPaths(
@@ -167,6 +175,94 @@ def snapshot_session_meta(paths: HistoryPaths) -> list[dict[str, str]]:
     return items
 
 
+def metadata_model_matches(current_model: str | None, profile: CurrentProfile) -> bool:
+    return profile.model is None or current_model == profile.model
+
+
+def metadata_matches_profile(provider: str | None, model: str | None, profile: CurrentProfile) -> bool:
+    return provider == profile.provider and metadata_model_matches(model, profile)
+
+
+def session_metadata_from_item(item: object, *, first_line: bool = False) -> SessionMetadata | None:
+    if not isinstance(item, dict):
+        return None
+    if item.get("type") == "session_meta":
+        payload = item.get("payload")
+        if not isinstance(payload, dict):
+            return None
+        provider = str(payload.get("model_provider") or "") or None
+        model = str(payload.get("model") or "") if payload.get("model") else None
+        thread_id = str(payload.get("id")) if payload.get("id") else None
+        return SessionMetadata(
+            thread_id=thread_id,
+            provider=provider,
+            model=model,
+            missing_provider=provider is None,
+        )
+    if first_line and item.get("id") and "type" not in item:
+        provider = str(item.get("model_provider") or "") or None
+        model = str(item.get("model") or "") if item.get("model") else None
+        return SessionMetadata(
+            thread_id=str(item["id"]),
+            provider=provider,
+            model=model,
+            missing_provider=provider is None,
+        )
+    return None
+
+
+def session_file_metadata(path: Path) -> list[SessionMetadata]:
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    items = []
+    for index, line in enumerate(lines):
+        if not line.strip():
+            continue
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        metadata = session_metadata_from_item(item, first_line=index == 0)
+        if metadata is not None:
+            items.append(metadata)
+    return items
+
+
+def session_profile_status(paths: HistoryPaths, profile: CurrentProfile, thread_ids: set[str]) -> dict[str, int]:
+    mismatched_session_files = 0
+    missing_provider_files = 0
+    mismatched_model_files = 0
+    inspected_session_files = 0
+    for path in iter_session_files(paths):
+        records = [record for record in session_file_metadata(path) if record.thread_id in thread_ids]
+        if not records:
+            continue
+        inspected_session_files += 1
+        file_mismatched = False
+        file_missing_provider = False
+        file_model_mismatched = False
+        for record in records:
+            provider_mismatched = record.provider != profile.provider
+            model_mismatched = not metadata_model_matches(record.model, profile)
+            file_mismatched = file_mismatched or provider_mismatched or model_mismatched
+            file_missing_provider = file_missing_provider or record.missing_provider
+            file_model_mismatched = file_model_mismatched or model_mismatched
+        if file_mismatched:
+            mismatched_session_files += 1
+        if file_missing_provider:
+            missing_provider_files += 1
+        if file_model_mismatched:
+            mismatched_model_files += 1
+    return {
+        "inspected_session_files": inspected_session_files,
+        "mismatched_session_files": mismatched_session_files,
+        "session_files_missing_provider": missing_provider_files,
+        "mismatched_session_model_files": mismatched_model_files,
+    }
+
+
 def update_database_threads(paths: HistoryPaths, profile: CurrentProfile) -> dict[str, object]:
     with connect_db(paths.db_path) as conn:
         if not table_exists(conn, "threads"):
@@ -235,7 +331,7 @@ def update_session_files(paths: HistoryPaths, profile: CurrentProfile) -> dict[s
         lines = text.splitlines(keepends=True)
         new_lines: list[str] = []
         file_changed = False
-        for line in lines:
+        for index, line in enumerate(lines):
             content, ending = split_line_ending(line)
             if not content:
                 new_lines.append(line)
@@ -245,22 +341,33 @@ def update_session_files(paths: HistoryPaths, profile: CurrentProfile) -> dict[s
             except json.JSONDecodeError:
                 new_lines.append(line)
                 continue
-            if item.get("type") != "session_meta":
+            if item.get("type") == "session_meta":
+                payload = item.get("payload")
+                if not isinstance(payload, dict):
+                    new_lines.append(line)
+                    continue
+                current_provider = str(payload.get("model_provider") or "") or None
+                current_model = str(payload.get("model") or "") if payload.get("model") else None
+                if metadata_matches_profile(current_provider, current_model, profile):
+                    new_lines.append(line)
+                    continue
+                payload["model_provider"] = profile.provider
+                if profile.model:
+                    payload["model"] = profile.model
+                new_lines.append(json.dumps(item, ensure_ascii=False, separators=(",", ":")) + ending)
+                file_changed = True
+                continue
+            if not (index == 0 and isinstance(item, dict) and item.get("id") and "type" not in item):
                 new_lines.append(line)
                 continue
-            payload = item.get("payload")
-            if not isinstance(payload, dict):
+            current_provider = str(item.get("model_provider") or "") or None
+            current_model = str(item.get("model") or "") if item.get("model") else None
+            if metadata_matches_profile(current_provider, current_model, profile):
                 new_lines.append(line)
                 continue
-            current_provider = str(payload.get("model_provider") or "")
-            current_model = str(payload.get("model") or "") if payload.get("model") else None
-            model_matches = profile.model is None or current_model == profile.model
-            if current_provider == profile.provider and model_matches:
-                new_lines.append(line)
-                continue
-            payload["model_provider"] = profile.provider
+            item["model_provider"] = profile.provider
             if profile.model:
-                payload["model"] = profile.model
+                item["model"] = profile.model
             new_lines.append(json.dumps(item, ensure_ascii=False, separators=(",", ":")) + ending)
             file_changed = True
         if not file_changed:
@@ -356,19 +463,9 @@ def read_session_index_entries(paths: HistoryPaths) -> list[dict[str, object]]:
 def session_file_thread_ids(paths: HistoryPaths) -> set[str]:
     ids: set[str] = set()
     for path in iter_session_files(paths):
-        try:
-            first_line, _, _ = split_first_line(path.read_text(encoding="utf-8"))
-        except OSError:
-            continue
-        if not first_line:
-            continue
-        try:
-            item = json.loads(first_line)
-        except json.JSONDecodeError:
-            continue
-        payload = item.get("payload")
-        if item.get("type") == "session_meta" and isinstance(payload, dict) and payload.get("id"):
-            ids.add(str(payload["id"]))
+        for metadata in session_file_metadata(path):
+            if metadata.thread_id:
+                ids.add(metadata.thread_id)
     return ids
 
 
@@ -651,14 +748,15 @@ def sync_history_visibility_if_ready(paths: HistoryPaths) -> dict[str, object]:
     current_status = status(paths)
     mismatched_provider = int(current_status.get("mismatched_provider_threads") or 0)
     mismatched_model = int(current_status.get("mismatched_model_threads") or 0)
-    if mismatched_provider == 0 and mismatched_model == 0:
+    mismatched_sessions = int(current_status.get("mismatched_session_files") or 0)
+    if mismatched_provider == 0 and mismatched_model == 0 and mismatched_sessions == 0:
         return {
             **current_status,
             "skipped": True,
             "visibility_only": True,
             "reason": "history already matches current provider/model",
         }
-    return sync_history_visibility_to_current_profile(paths)
+    return {**current_status, **sync_history_visibility_to_current_profile(paths)}
 
 
 def sync_history_if_ready(paths: HistoryPaths) -> dict[str, object]:
@@ -668,13 +766,14 @@ def sync_history_if_ready(paths: HistoryPaths) -> dict[str, object]:
     current_status = status(paths)
     mismatched_provider = int(current_status.get("mismatched_provider_threads") or 0)
     mismatched_model = int(current_status.get("mismatched_model_threads") or 0)
-    if mismatched_provider == 0 and mismatched_model == 0:
+    mismatched_sessions = int(current_status.get("mismatched_session_files") or 0)
+    if mismatched_provider == 0 and mismatched_model == 0 and mismatched_sessions == 0:
         return {
             **current_status,
             "skipped": True,
             "reason": "history already matches current provider/model",
         }
-    return sync_history_to_current_profile(paths)
+    return {**current_status, **sync_history_to_current_profile(paths)}
 
 
 def status(paths: HistoryPaths) -> dict[str, object]:
@@ -684,6 +783,7 @@ def status(paths: HistoryPaths) -> dict[str, object]:
     profile = read_current_profile(paths)
     with connect_db(paths.db_path, readonly=True) as conn:
         if not table_exists(conn, "threads"):
+            session_file_count = len(iter_session_files(paths))
             return {
                 "ok": True,
                 "ready": True,
@@ -692,8 +792,12 @@ def status(paths: HistoryPaths) -> dict[str, object]:
                 "total_threads": 0,
                 "mismatched_provider_threads": 0,
                 "mismatched_model_threads": None,
-                "session_file_count": len(iter_session_files(paths)),
+                "session_file_count": session_file_count,
                 "session_index_count": len(read_session_index_entries(paths)),
+                "inspected_session_files": 0,
+                "mismatched_session_files": 0,
+                "session_files_missing_provider": 0,
+                "mismatched_session_model_files": 0,
                 "skipped_database_status": "missing threads table",
             }
         columns = table_columns(conn, "threads")
@@ -712,6 +816,9 @@ def status(paths: HistoryPaths) -> dict[str, object]:
                     (profile.model,),
                 ).fetchone()[0]
             )
+        thread_ids = {str(row["id"]) for row in conn.execute("SELECT id FROM threads").fetchall()} if "id" in columns else set()
+    session_file_count = len(iter_session_files(paths))
+    session_status = session_profile_status(paths, profile, thread_ids)
     return {
         "ok": True,
         "ready": True,
@@ -720,6 +827,7 @@ def status(paths: HistoryPaths) -> dict[str, object]:
         "total_threads": total,
         "mismatched_provider_threads": mismatched_provider,
         "mismatched_model_threads": mismatched_model,
-        "session_file_count": len(iter_session_files(paths)),
+        "session_file_count": session_file_count,
         "session_index_count": len(read_session_index_entries(paths)),
+        **session_status,
     }

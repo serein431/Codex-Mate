@@ -1365,9 +1365,9 @@
   function authProtectionStepState(kind, payload, currentMode) {
     const providerMode = payload?.provider_mode?.mode || "";
     const loginReady = payload?.login_preserving_available === true || payload?.provider_mode?.chatgpt_login_token_present === true;
-    const providerApiReady = payload?.provider_api_ready === true || payload?.login_preserving_provider?.ready === true || providerMode === "official" || providerMode === "mixed-api";
+    const providerConfigReady = payload?.provider_config_ready === true || payload?.login_preserving_provider?.provider_config_ready === true || providerMode === "official" || providerMode === "mixed-api";
     const loginProtectionReady = payload?.login_preserving_available === true;
-    if (kind === "provider") return providerApiReady ? "ok" : "todo";
+    if (kind === "provider") return providerConfigReady ? "ok" : "todo";
     if (kind === "login") return loginReady ? "ok" : "todo";
     if (kind === "entry") return currentMode === "loginPreserving" && loginProtectionReady ? "ok" : "todo";
     return "todo";
@@ -1396,12 +1396,15 @@
       const mode = button.getAttribute("data-codex-mate-auth-mode");
       const waiting = status === "checking" || status === "saving";
       const providerApiReady = payload.provider_api_ready === true || payload.login_preserving_provider?.ready === true;
+      const providerConfigReady = payload.provider_config_ready === true || payload.login_preserving_provider?.provider_config_ready === true;
       button.disabled = waiting;
       button.dataset.active = String(mode === currentMode);
       button.setAttribute(
         "title",
         mode === "loginPreserving" && !providerApiReady
           ? "先在供应商配置或 CC Switch 中保存第三方 API Key。"
+          : mode === "loginPreserving" && !providerConfigReady
+            ? "点击后先把第三方 API Key 写入 provider，再登录 ChatGPT。"
           : mode === "loginPreserving" && !loginReady
             ? "先保存 API Key，再登录 ChatGPT；登录后重新检测即可启用。"
             : mode === "loginPreserving"
@@ -1412,9 +1415,9 @@
     document.querySelectorAll("[data-codex-mate-refresh-auth]").forEach((button) => {
       const waiting = status === "checking" || status === "saving";
       button.disabled = waiting;
-      const providerApiReady = payload.provider_api_ready === true || payload.login_preserving_provider?.ready === true;
-      button.textContent = waiting ? "正在检测…" : loginReady ? "重新检测" : providerApiReady ? "我已登录，重新检测" : "重新检测";
-      button.setAttribute("title", loginReady ? "重新检测 ChatGPT 登录状态。" : providerApiReady ? "登录 ChatGPT 后重新检测。" : "重新读取本机 provider 和登录状态。");
+      const providerConfigReady = payload.provider_config_ready === true || payload.login_preserving_provider?.provider_config_ready === true;
+      button.textContent = waiting ? "正在检测…" : "重新检测";
+      button.setAttribute("title", loginReady ? "重新检测 ChatGPT 登录状态。" : providerConfigReady ? "登录 ChatGPT 后重新检测。" : "重新读取本机 provider 和登录状态。");
     });
   }
 
@@ -2586,10 +2589,31 @@
   }
 
   function officialPluginMarketplaceName(value) {
-    const current = String(value || "").trim();
-    if (!current || current === "openai-bundled" || current === "openai-bundled-remote") return "openai-curated";
+    const current = pluginMarketplaceValue(value);
+    if (!current || isBundledPluginMarketplaceValue(current)) return "openai-curated";
     if (codexMateCuratedMarketplaceNames.has(current)) return "openai-curated";
     return current;
+  }
+
+  function patchPluginMarketplaceFieldValue(value) {
+    if (Array.isArray(value)) {
+      let changed = false;
+      const next = value.map((item) => {
+        const patched = patchPluginMarketplaceFieldValue(item);
+        if (patched !== item) changed = true;
+        return patched;
+      });
+      if (next.length === 0) {
+        next.push("openai-curated");
+        changed = true;
+      }
+      return changed ? next : value;
+    }
+    if (typeof value === "string" || value == null) {
+      const patched = officialPluginMarketplaceName(value);
+      return patched !== value ? patched : value;
+    }
+    return value;
   }
 
   function normalizedCuratedPluginMarketplaceName(name, marketplacePath = "", displayName = "") {
@@ -2606,15 +2630,24 @@
     if (!params || typeof params !== "object" || Array.isArray(params)) return params;
     let changed = false;
     const next = { ...params };
-    ["marketplaceName", "marketplace", "marketplace_name"].forEach((key) => {
+    [
+      "marketplaceName",
+      "marketplace",
+      "marketplace_name",
+      "marketplaceNames",
+      "marketplaces",
+      "marketplace_names",
+      "selectedMarketplaceFilterValue",
+      "marketplaceFilterValue",
+    ].forEach((key) => {
       if (!Object.prototype.hasOwnProperty.call(next, key)) return;
-      const value = officialPluginMarketplaceName(next[key]);
+      const value = patchPluginMarketplaceFieldValue(next[key]);
       if (value !== next[key]) {
         next[key] = value;
         changed = true;
       }
     });
-    ["params", "payload", "arguments", "request"].forEach((key) => {
+    ["params", "payload", "arguments", "request", "filter", "filters", "query"].forEach((key) => {
       const value = next[key];
       if (!value || typeof value !== "object" || Array.isArray(value)) return;
       const patched = patchPluginListRequestParams(value);

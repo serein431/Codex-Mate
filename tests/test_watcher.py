@@ -160,6 +160,14 @@ def test_windows_takeover_keeps_short_grace_and_backoff(monkeypatch):
     assert watcher.takeover_failure_backoff_seconds() == watcher.TAKEOVER_FAILURE_BACKOFF_SECONDS
 
 
+def test_takeover_history_sync_policy(monkeypatch):
+    monkeypatch.setattr(watcher.sys, "platform", "darwin")
+    assert watcher.should_sync_history_during_takeover() is False
+
+    monkeypatch.setattr(watcher.sys, "platform", "win32")
+    assert watcher.should_sync_history_during_takeover() is True
+
+
 def test_spawn_launcher_detaches_on_macos(monkeypatch):
     calls = []
     monkeypatch.setattr(watcher.sys, "platform", "darwin")
@@ -433,7 +441,7 @@ def test_takeover_passes_running_codex_app_dir_before_killing(monkeypatch):
     assert events == [("stop-launchers", []), ("kill", [123]), ("spawn", [app_dir])]
 
 
-def test_takeover_syncs_history_after_codex_exits_before_spawning_launcher_on_macos(monkeypatch):
+def test_takeover_skips_history_sync_before_spawning_launcher_on_macos(monkeypatch):
     events = []
 
     class Proc:
@@ -458,7 +466,6 @@ def test_takeover_syncs_history_after_codex_exits_before_spawning_launcher_on_ma
         ("stop-launchers", []),
         ("kill", [123]),
         ("wait-exit", []),
-        ("sync-history", []),
         ("spawn", [None]),
     ]
 

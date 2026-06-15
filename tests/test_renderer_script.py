@@ -154,9 +154,13 @@ def test_renderer_script_patches_curated_plugin_marketplace_visibility():
     assert 'method === "send-cli-request-for-host"' in text
     assert 'normalized === "plugin/list" || normalized === "list-plugins" || normalized === "listPlugins"' in text
     assert "patchPluginListRequestParams" in text
+    assert "patchPluginMarketplaceFieldValue" in text
     assert "officialPluginMarketplaceName" in text
     assert 'return "openai-curated"' in text
     assert 'next.marketplaceName = "openai-curated"' in text
+    assert '"marketplaceNames"' in text
+    assert '"selectedMarketplaceFilterValue"' in text
+    assert '"filters"' in text
     assert "originalSendRequest(method, patchedParams, options)" in text
     assert 'new Set(["openai-curated", "openai-curated-remote", "codex-mate-curated"])' in text
     assert "normalizedCuratedPluginMarketplaceName" in text
@@ -666,9 +670,10 @@ def test_renderer_script_does_not_include_fast_mode_patch():
     assert "保护官方登录" in text
     assert "当前状态" in text
     assert "未检测到 ChatGPT 登录" in text
-    assert "我已登录，重新检测" in text
-    assert 'button.textContent = waiting ? "正在检测…" : loginReady ? "重新检测" : providerApiReady ? "我已登录，重新检测" : "重新检测"' in text
-    assert "先把第三方 API Key 写入 provider，再登录 ChatGPT" in text
+    assert "我已登录，重新检测" not in text
+    assert 'button.textContent = waiting ? "正在检测…" : "重新检测"' in text
+    assert "点击后先把第三方 API Key 写入 provider，再登录 ChatGPT" in text
+    assert 'payload?.provider_config_ready === true' in text
     assert "仅使用兼容模式" in text
     assert "供应商配置" in text
     assert "CC Switch 速切" in text

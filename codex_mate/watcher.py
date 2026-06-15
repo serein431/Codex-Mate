@@ -120,7 +120,7 @@ def takeover_failure_backoff_seconds() -> float:
 
 
 def should_sync_history_during_takeover() -> bool:
-    return True
+    return sys.platform != "darwin"
 
 
 def cdp_ready(port: int) -> bool:
