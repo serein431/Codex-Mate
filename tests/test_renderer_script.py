@@ -118,7 +118,7 @@ def test_renderer_script_enables_plugin_entry_for_api_key_users():
 def test_renderer_script_patches_curated_plugin_marketplace_visibility():
     text = Path("codex_mate/inject/renderer-inject.js").read_text(encoding="utf-8")
     assert "codexMatePluginListPatchVersion" in text
-    assert 'codexMatePluginListPatchVersion = "4"' in text
+    assert 'codexMatePluginListPatchVersion = "5"' in text
     assert "__codexMatePluginListLoadedVersion" in text
     assert "__codexMatePluginListMessagePatch = null" in text
     assert "__codexMatePluginListRequestPatch = null" in text
@@ -154,13 +154,33 @@ def test_renderer_script_patches_curated_plugin_marketplace_visibility():
     assert 'method === "send-cli-request-for-host"' in text
     assert 'normalized === "plugin/list" || normalized === "list-plugins" || normalized === "listPlugins"' in text
     assert "patchPluginListRequestParams" in text
-    assert "patchPluginMarketplaceFieldValue" in text
-    assert "officialPluginMarketplaceName" in text
-    assert 'return "openai-curated"' in text
-    assert 'next.marketplaceName = "openai-curated"' in text
-    assert '"marketplaceNames"' in text
+    assert "restorePluginMarketplaceRequestParams" in text
+    assert "delete next.marketplaceKinds" in text
+    assert "plugin_marketplace_request_expanded" in text
+    assert "pluginMarketplaceAliasForName" in text
+    assert 'if (name === "openai-curated") return "codex-mate-openai-curated"' in text
+    assert 'if (name === "openai-primary-runtime") return "codex-mate-openai-primary-runtime"' in text
+    assert "restorePluginMarketplaceName" in text
+    assert "codexMatePluginOfficialMarketplaceName" in text
+    assert "installPluginBuildFlavorFilterPatch" in text
+    assert "Array.prototype.filter" in text
+    assert "codexMatePluginBuildFlavorFilterPatch" in text
+    assert "isCodexMatePluginBuildFlavorFilter" in text
+    assert "isCodexMatePluginMarketplaceHiddenFilter" in text
+    assert "plugin_build_flavor_filter_bypassed" in text
+    assert "plugin_marketplace_hidden_filter_bypassed" in text
+    assert "plugin_marketplace_response_debug" in text
+    assert "pluginMarketplaceCounts" in text
+    assert "remoteMarketplaceName" in text
+    assert "method === \"install-plugin\"" in text
+    assert "plugin_install_request_debug" in text
+    assert "plugin_install_request_failed" in text
+    assert "next.remoteMarketplaceName = restorePluginMarketplaceName(next.remoteMarketplaceName)" in text
+    assert "delete next.marketplacePath" in text
+    assert 'next.marketplaceName = "openai-curated"' not in text
+    assert '"marketplaceNames"' not in text
     assert '"selectedMarketplaceFilterValue"' in text
-    assert '"filters"' in text
+    assert '"filters"' not in text
     assert "originalSendRequest(method, patchedParams, options)" in text
     assert 'new Set(["openai-curated", "openai-curated-remote", "codex-mate-curated"])' in text
     assert "normalizedCuratedPluginMarketplaceName" in text
@@ -168,7 +188,7 @@ def test_renderer_script_patches_curated_plugin_marketplace_visibility():
     assert "codexMateCuratedMarketplaceDisplayName" not in text
     assert "name: codexMateCuratedMarketplaceDisplayName" not in text
     assert "marketplaceName: codexMateCuratedMarketplaceDisplayName" not in text
-    assert "marketplaceName," in text
+    assert "marketplaceName: normalizedName" in text
     assert 'pluginEntryUnlock && event?.type === "codex-message-from-view"' in text
     assert "window.__codexMatePluginListRequestIds" in text
     scan_start = text.index("function scanLightweight")
