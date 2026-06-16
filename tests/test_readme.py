@@ -9,6 +9,9 @@ def test_readme_limits_discussion_group_qr_size():
     assert '![Codex Mate 交流群二维码](docs/images/discussion-group-qr.jpg)' not in text
     assert text.index("## 交流群") < text.index("## 主要功能")
     assert text.index("## 推荐中转站") < text.index("## 主要功能")
+    assert '<img src="docs/images/ai-agent-group-qr.jpg"' in text
+    assert 'alt="AI Agent 交流群二维码"' in text
+    assert "docs/images/corvus-relay-group-qr.jpg" not in text
     assert "[https://corvusapi.org/](https://corvusapi.org/)" in text
     assert "[https://jmrai.net/dashboard/overview](https://jmrai.net/dashboard/overview)" in text
 
@@ -177,6 +180,9 @@ def test_readme_describes_in_app_update_controls():
 def test_readme_describes_export_cc_switch_and_scroll_restore():
     text = Path("README.md").read_text(encoding="utf-8")
 
+    assert "role-specific-plugins" in text
+    assert "Product Design" in text
+    assert "Role-Specific Plugins" in text
     assert "导出当前对话为 Markdown" in text
     assert "移动会话到普通对话或其他项目" in text
     assert "CC Switch 速切" in text

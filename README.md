@@ -39,9 +39,9 @@ Maintainer resources:
 - 支付购买链接：[https://corvusapi.org/](https://corvusapi.org/)
 - 官方后台链接：[https://jmrai.net/dashboard/overview](https://jmrai.net/dashboard/overview)
 
-中转站交流群：
+AI Agent 交流群：
 
-<img src="docs/images/corvus-relay-group-qr.jpg" alt="Corvus 中转站交流群二维码" width="260">
+<img src="docs/images/ai-agent-group-qr.jpg" alt="AI Agent 交流群二维码" width="260">
 
 ## 主要功能
 
@@ -319,6 +319,8 @@ API Key 模式下，原生 Codex 的插件入口可能会要求登录 ChatGPT：
 ### 插件入口解锁
 
 Codex Mate 会让 API Key 模式下的插件入口显示并可用，适合使用自定义 provider、API Key 或切换工具的用户。
+
+启动时还会自动准备并注册 `role-specific-plugins` 本地市场。这个市场里有 Product Design、Data Analytics、Sales、Financial Markets 等角色插件；如果插件市场里找不到 Product Design，重启 Codex 后在市场来源里选择 `Role-Specific Plugins` 安装即可。
 
 ### Provider 模式
 

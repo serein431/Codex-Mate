@@ -118,7 +118,7 @@ def test_renderer_script_enables_plugin_entry_for_api_key_users():
 def test_renderer_script_patches_curated_plugin_marketplace_visibility():
     text = Path("codex_mate/inject/renderer-inject.js").read_text(encoding="utf-8")
     assert "codexMatePluginListPatchVersion" in text
-    assert 'codexMatePluginListPatchVersion = "5"' in text
+    assert 'codexMatePluginListPatchVersion = "6"' in text
     assert "__codexMatePluginListLoadedVersion" in text
     assert "__codexMatePluginListMessagePatch = null" in text
     assert "__codexMatePluginListRequestPatch = null" in text
@@ -160,6 +160,8 @@ def test_renderer_script_patches_curated_plugin_marketplace_visibility():
     assert "pluginMarketplaceAliasForName" in text
     assert 'if (name === "openai-curated") return "codex-mate-openai-curated"' in text
     assert 'if (name === "openai-primary-runtime") return "codex-mate-openai-primary-runtime"' in text
+    assert 'if (name === "role-specific-plugins") return "codex-mate-role-specific-plugins"' in text
+    assert "Role-Specific Plugins" in text
     assert "restorePluginMarketplaceName" in text
     assert "codexMatePluginOfficialMarketplaceName" in text
     assert "installPluginBuildFlavorFilterPatch" in text
@@ -183,6 +185,7 @@ def test_renderer_script_patches_curated_plugin_marketplace_visibility():
     assert '"filters"' not in text
     assert "originalSendRequest(method, patchedParams, options)" in text
     assert 'new Set(["openai-curated", "openai-curated-remote", "codex-mate-curated"])' in text
+    assert "role-specific-plugins" in text
     assert "normalizedCuratedPluginMarketplaceName" in text
     assert 'return "openai-curated"' in text
     assert "codexMateCuratedMarketplaceDisplayName" not in text

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import subprocess
 import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
@@ -45,6 +46,10 @@ CURATED_PLUGIN_SOURCE_MARKETPLACE_NAME = "openai-curated"
 CURATED_PLUGIN_MARKETPLACE_NAME = "openai-curated"
 CURATED_PLUGIN_MANAGED_ALIAS_MARKETPLACE_NAME = "openai-bundled"
 LEGACY_CURATED_PLUGIN_MARKETPLACE_NAMES = ("openai-curated", "openai-curated-remote")
+ROLE_SPECIFIC_PLUGIN_MARKETPLACE_NAME = "role-specific-plugins"
+ROLE_SPECIFIC_PLUGIN_REPO_URL = "https://github.com/openai/role-specific-plugins.git"
+ROLE_SPECIFIC_PLUGIN_REQUIRED_NAMES = ("product-design",)
+ROLE_SPECIFIC_PLUGIN_HIGHLIGHTED_NAMES = ("product-design", "data-analytics")
 
 
 def default_codex_home() -> Path:
@@ -125,6 +130,11 @@ def bundled_plugin_cache_path(codex_home: str | Path | None = None, marketplace_
 def curated_plugin_marketplace_root(codex_home: str | Path | None = None) -> Path:
     home = Path(codex_home).expanduser() if codex_home is not None else default_codex_home()
     return home / ".tmp" / "plugins"
+
+
+def role_specific_plugin_marketplace_root(codex_home: str | Path | None = None) -> Path:
+    home = Path(codex_home).expanduser() if codex_home is not None else default_codex_home()
+    return home / ".tmp" / ROLE_SPECIFIC_PLUGIN_MARKETPLACE_NAME
 
 
 def curated_plugin_marketplace_alias_root(
@@ -328,6 +338,170 @@ def ensure_curated_plugin_marketplace_registered(
     }
 
 
+def role_specific_plugin_marketplace_status(
+    codex_home: str | Path | None = None,
+    *,
+    marketplace_name: str = ROLE_SPECIFIC_PLUGIN_MARKETPLACE_NAME,
+) -> dict[str, object]:
+    root = role_specific_plugin_marketplace_root(codex_home)
+    manifest_path = curated_plugin_marketplace_path(root)
+    config_path = config_path_for(codex_home)
+    manifest = read_json_object(manifest_path)
+    plugins = manifest.get("plugins") if isinstance(manifest, dict) else None
+    plugin_count = len(plugins) if isinstance(plugins, list) else 0
+    plugin_names = marketplace_plugin_names(plugins if isinstance(plugins, list) else [])
+    invalid_plugins = curated_marketplace_invalid_plugins(root, plugins if isinstance(plugins, list) else [])
+    required_missing = [name for name in ROLE_SPECIFIC_PLUGIN_REQUIRED_NAMES if name not in plugin_names]
+    highlighted_present = sorted(name for name in ROLE_SPECIFIC_PLUGIN_HIGHLIGHTED_NAMES if name in plugin_names)
+    highlighted_missing = [name for name in ROLE_SPECIFIC_PLUGIN_HIGHLIGHTED_NAMES if name not in plugin_names]
+    config = read_config(config_path)
+    marketplace_config = marketplace_config_for(config, marketplace_name)
+    registered = marketplace_config_source_matches(marketplace_config, root)
+    source_present = (
+        isinstance(manifest, dict)
+        and isinstance(manifest.get("name"), str)
+        and isinstance(plugins, list)
+        and plugin_count > 0
+        and not invalid_plugins
+        and not required_missing
+    )
+    reasons: list[str] = []
+    if manifest is None:
+        reasons.append("role-specific plugin marketplace not found")
+    elif not isinstance(plugins, list) or plugin_count == 0:
+        reasons.append("role-specific plugin marketplace has no plugins")
+    if invalid_plugins:
+        reasons.append("role-specific plugin marketplace contains invalid plugin paths")
+    if required_missing and isinstance(plugins, list):
+        reasons.append("role-specific plugin marketplace is missing product-design")
+    if config is None:
+        reasons.append("config.toml missing or unreadable")
+    elif not registered:
+        reasons.append("role-specific plugin marketplace not registered in config.toml")
+    ready = source_present and registered
+    return {
+        "ready": ready,
+        "reason": "role-specific plugin marketplace is registered" if ready else "; ".join(reasons),
+        "marketplace_name": marketplace_name,
+        "source_ready": source_present,
+        "source_path": str(root),
+        "manifest_path": str(manifest_path),
+        "config_path": str(config_path),
+        "plugin_count": plugin_count,
+        "plugin_names": plugin_names,
+        "highlighted_plugins_present": highlighted_present,
+        "highlighted_plugins_missing": highlighted_missing,
+        "invalid_plugins": invalid_plugins,
+        "registered": registered,
+    }
+
+
+def ensure_role_specific_plugin_marketplace_source(
+    codex_home: str | Path | None = None,
+    *,
+    repo_url: str = ROLE_SPECIFIC_PLUGIN_REPO_URL,
+    timeout_seconds: float = 15,
+) -> dict[str, object]:
+    status = role_specific_plugin_marketplace_status(codex_home)
+    if status.get("source_ready") is True:
+        return {"status": "skipped", "download_status": "skipped", "download_error": "", **status}
+
+    root = role_specific_plugin_marketplace_root(codex_home)
+    if root.exists() and not (root / ".git").exists():
+        return {
+            "status": "skipped",
+            "download_status": "skipped",
+            "download_error": "existing source is not a git checkout",
+            **status,
+        }
+
+    git_path = shutil.which("git")
+    if not git_path:
+        return {"status": "skipped", "download_status": "skipped", "download_error": "git not found", **status}
+
+    staging_root = root.with_name(f"{root.name}.staging")
+    root.parent.mkdir(parents=True, exist_ok=True)
+    shutil.rmtree(staging_root, ignore_errors=True)
+    try:
+        subprocess.run(
+            [git_path, "clone", "--depth", "1", repo_url, str(staging_root)],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as exc:
+        shutil.rmtree(staging_root, ignore_errors=True)
+        return {
+            "status": "skipped",
+            "download_status": "failed",
+            "download_error": f"git clone timed out after {timeout_seconds:g}s",
+            **status,
+        }
+    except (OSError, subprocess.CalledProcessError) as exc:
+        shutil.rmtree(staging_root, ignore_errors=True)
+        detail = getattr(exc, "stderr", "") or str(exc)
+        return {
+            "status": "skipped",
+            "download_status": "failed",
+            "download_error": str(detail).strip(),
+            **status,
+        }
+
+    if root.exists():
+        shutil.rmtree(root)
+    staging_root.rename(root)
+    refreshed = role_specific_plugin_marketplace_status(codex_home)
+    if refreshed.get("source_ready") is not True:
+        return {
+            "status": "skipped",
+            "download_status": "updated",
+            "download_error": "downloaded marketplace is invalid",
+            **refreshed,
+        }
+    return {"status": "updated", "download_status": "updated", "download_error": "", **refreshed}
+
+
+def ensure_role_specific_plugin_marketplace_registered(
+    codex_home: str | Path | None = None,
+    *,
+    marketplace_name: str = ROLE_SPECIFIC_PLUGIN_MARKETPLACE_NAME,
+) -> dict[str, object]:
+    source_result = ensure_role_specific_plugin_marketplace_source(codex_home)
+    source_changed = source_result.get("status") == "updated"
+    source_fields = {key: value for key, value in source_result.items() if key != "status"}
+    status = role_specific_plugin_marketplace_status(codex_home, marketplace_name=marketplace_name)
+    status.update({key: value for key, value in source_fields.items() if key.startswith("download_")})
+
+    if status.get("source_ready") is not True:
+        return {"status": "skipped", **status}
+    if status.get("ready") is True:
+        return {"status": "updated" if source_changed else "skipped", **status}
+
+    config_path = Path(str(status["config_path"]))
+    if not config_path.exists() or read_config(config_path) is None:
+        return {"status": "skipped", **status}
+    text = config_path.read_text(encoding="utf-8")
+    updated = set_local_marketplace_in_toml(
+        text,
+        marketplace_name=marketplace_name,
+        source_path=str(status["source_path"]),
+    )
+    if updated == text:
+        refreshed = role_specific_plugin_marketplace_status(codex_home, marketplace_name=marketplace_name)
+        refreshed.update({key: value for key, value in status.items() if key.startswith("download_")})
+        return {"status": "updated" if source_changed else "skipped", **refreshed}
+    backup_path = backup_config(config_path, f"marketplace-{marketplace_name}")
+    config_path.write_text(updated, encoding="utf-8")
+    refreshed = role_specific_plugin_marketplace_status(codex_home, marketplace_name=marketplace_name)
+    refreshed.update({key: value for key, value in status.items() if key.startswith("download_")})
+    return {
+        "status": "updated",
+        "backup_path": str(backup_path),
+        **refreshed,
+    }
+
+
 def curated_marketplace_invalid_plugins(marketplace_root: Path, plugins: list[object]) -> list[str]:
     invalid: list[str] = []
     for item in plugins:
@@ -344,6 +518,17 @@ def curated_marketplace_invalid_plugins(marketplace_root: Path, plugins: list[ob
         if not plugin_json.exists():
             invalid.append(name)
     return invalid
+
+
+def marketplace_plugin_names(plugins: list[object]) -> list[str]:
+    names: list[str] = []
+    for item in plugins:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if name:
+            names.append(name)
+    return sorted(names)
 
 
 def marketplace_config_for(config: dict[str, Any] | None, marketplace_name: str) -> dict[str, Any] | None:

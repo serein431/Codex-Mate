@@ -33,6 +33,7 @@ class FakeProcess:
 def stub_launch_plugin_marketplace_repairs(monkeypatch):
     monkeypatch.setattr(launcher.native_features, "ensure_bundled_plugin_marketplace_cache", lambda **kwargs: {"status": "skipped"})
     monkeypatch.setattr(launcher.native_features, "ensure_curated_plugin_marketplace_registered", lambda **kwargs: {"status": "skipped"})
+    monkeypatch.setattr(launcher.native_features, "ensure_role_specific_plugin_marketplace_registered", lambda **kwargs: {"status": "skipped"})
 
 
 def test_launch_codex_windows_adds_remote_debugging_port(monkeypatch):
@@ -762,6 +763,7 @@ def test_launch_uses_resolved_app_dir(monkeypatch, tmp_path):
 def test_launch_repairs_plugin_marketplaces(monkeypatch, tmp_path):
     bundled_calls = []
     curated_calls = []
+    role_specific_calls = []
     app = tmp_path / "Codex.app"
     monkeypatch.setattr(launcher, "resolve_codex_app_dir", lambda app_dir=None: app)
     monkeypatch.setattr(launcher, "prepare_windows_codex_relaunch", lambda debug_port: None)
@@ -778,11 +780,17 @@ def test_launch_repairs_plugin_marketplaces(monkeypatch, tmp_path):
         "ensure_curated_plugin_marketplace_registered",
         lambda **kwargs: curated_calls.append(kwargs) or {"status": "skipped"},
     )
+    monkeypatch.setattr(
+        launcher.native_features,
+        "ensure_role_specific_plugin_marketplace_registered",
+        lambda **kwargs: role_specific_calls.append(kwargs) or {"status": "skipped"},
+    )
 
     launcher.launch_and_inject(None, None, tmp_path / "backups", 9229, 57321)
 
     assert bundled_calls == [{"app_dir": app}]
     assert curated_calls == [{}]
+    assert role_specific_calls == [{}]
 
 
 def test_launch_and_inject_attaches_without_reopening_when_cdp_is_already_ready(monkeypatch, tmp_path):
@@ -801,7 +809,7 @@ def test_launch_and_inject_attaches_without_reopening_when_cdp_is_already_ready(
     assert launched == []
 
 
-def test_launch_and_inject_restarts_running_codex_when_curated_marketplace_registration_changes(monkeypatch, tmp_path):
+def test_launch_and_inject_restarts_running_codex_when_plugin_marketplace_registration_changes(monkeypatch, tmp_path):
     launched = []
     prepare_calls = []
     monkeypatch.setattr(launcher.sys, "platform", "darwin")
@@ -825,6 +833,11 @@ def test_launch_and_inject_restarts_running_codex_when_curated_marketplace_regis
     monkeypatch.setattr(
         launcher.native_features,
         "ensure_curated_plugin_marketplace_registered",
+        lambda **kwargs: {"status": "skipped"},
+    )
+    monkeypatch.setattr(
+        launcher.native_features,
+        "ensure_role_specific_plugin_marketplace_registered",
         lambda **kwargs: {"status": "updated"},
     )
 

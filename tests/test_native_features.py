@@ -2,6 +2,7 @@ from pathlib import Path
 import json
 import shutil
 import sqlite3
+import subprocess
 
 from codex_mate import native_features
 
@@ -202,6 +203,98 @@ def test_ensure_curated_plugin_marketplace_registered_skips_invalid_plugin_paths
     assert payload["status"] == "skipped"
     assert payload["invalid_plugins"] == ["linear"]
     assert "openai-bundled" not in config_path.read_text(encoding="utf-8")
+
+
+def test_ensure_role_specific_plugin_marketplace_registered_clones_and_adds_local_marketplace(monkeypatch, tmp_path):
+    codex_home = tmp_path / ".codex"
+    codex_home.mkdir()
+    config_path = codex_home / "config.toml"
+    config_path.write_text("", encoding="utf-8")
+    clone_calls = []
+
+    def fake_run(command, **kwargs):
+        clone_calls.append((command, kwargs))
+        target = Path(command[-1])
+        write_curated_marketplace(
+            target,
+            ["product-design", "data-analytics", "sales"],
+            marketplace_name="role-specific-plugins",
+        )
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(native_features.shutil, "which", lambda name: "/usr/bin/git" if name == "git" else None)
+    monkeypatch.setattr(native_features.subprocess, "run", fake_run)
+
+    payload = native_features.ensure_role_specific_plugin_marketplace_registered(codex_home)
+
+    config = native_features.read_config(config_path)
+    assert payload["status"] == "updated"
+    assert payload["ready"] is True
+    assert payload["download_status"] == "updated"
+    assert payload["marketplace_name"] == "role-specific-plugins"
+    assert payload["plugin_count"] == 3
+    assert payload["highlighted_plugins_present"] == ["data-analytics", "product-design"]
+    assert clone_calls
+    assert clone_calls[0][0][:3] == ["/usr/bin/git", "clone", "--depth"]
+    assert config["marketplaces"]["role-specific-plugins"]["source_type"] == "local"
+    assert config["marketplaces"]["role-specific-plugins"]["source"] == str(codex_home / ".tmp" / "role-specific-plugins")
+    assert Path(payload["backup_path"]).exists()
+
+
+def test_ensure_role_specific_plugin_marketplace_registered_uses_existing_source(tmp_path):
+    codex_home = tmp_path / ".codex"
+    codex_home.mkdir()
+    marketplace_root = codex_home / ".tmp" / "role-specific-plugins"
+    config_path = codex_home / "config.toml"
+    config_path.write_text("", encoding="utf-8")
+    write_curated_marketplace(
+        marketplace_root,
+        ["product-design", "data-analytics", "financial-markets"],
+        marketplace_name="role-specific-plugins",
+    )
+
+    payload = native_features.ensure_role_specific_plugin_marketplace_registered(codex_home)
+
+    config = native_features.read_config(config_path)
+    assert payload["status"] == "updated"
+    assert payload["ready"] is True
+    assert payload["download_status"] == "skipped"
+    assert payload["plugin_count"] == 3
+    assert config["marketplaces"]["role-specific-plugins"]["source"] == str(marketplace_root)
+
+
+def test_ensure_role_specific_plugin_marketplace_registered_skips_when_git_missing(monkeypatch, tmp_path):
+    codex_home = tmp_path / ".codex"
+    codex_home.mkdir()
+    config_path = codex_home / "config.toml"
+    config_path.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(native_features.shutil, "which", lambda name: None)
+
+    payload = native_features.ensure_role_specific_plugin_marketplace_registered(codex_home)
+
+    assert payload["status"] == "skipped"
+    assert payload["source_ready"] is False
+    assert payload["download_status"] == "skipped"
+    assert payload["download_error"] == "git not found"
+    assert "role-specific-plugins" not in config_path.read_text(encoding="utf-8")
+
+
+def test_ensure_role_specific_plugin_marketplace_registered_skips_invalid_plugin_paths(tmp_path):
+    codex_home = tmp_path / ".codex"
+    codex_home.mkdir()
+    marketplace_root = codex_home / ".tmp" / "role-specific-plugins"
+    config_path = codex_home / "config.toml"
+    config_path.write_text("", encoding="utf-8")
+    write_curated_marketplace(marketplace_root, ["product-design"], marketplace_name="role-specific-plugins")
+    shutil.rmtree(marketplace_root / "plugins" / "product-design")
+
+    payload = native_features.ensure_role_specific_plugin_marketplace_registered(codex_home)
+
+    assert payload["status"] == "skipped"
+    assert payload["source_ready"] is False
+    assert payload["invalid_plugins"] == ["product-design"]
+    assert "role-specific-plugins" not in config_path.read_text(encoding="utf-8")
 
 
 def test_ensure_remote_feature_flags_updates_existing_features_section(tmp_path):

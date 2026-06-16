@@ -570,6 +570,15 @@ def launch_and_inject(app_dir: Path | None, db_path: Path | None, backup_dir: Pa
             watcher.log(f"curated plugin marketplace registration skipped: {exc}")
         except Exception:
             pass
+    try:
+        native_feature_results.append(native_features.ensure_role_specific_plugin_marketplace_registered())
+    except Exception as exc:
+        try:
+            from codex_mate import watcher
+
+            watcher.log(f"role-specific plugin marketplace registration skipped: {exc}")
+        except Exception:
+            pass
     if any(native_feature_result_requires_restart(result) for result in native_feature_results) and cdp_port_ready(debug_port):
         restart_running_codex_for_native_feature_change(debug_port)
     service = ApiFirstDeleteService(UnavailableApiAdapter(), db_path, backup_dir)

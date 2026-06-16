@@ -53,9 +53,10 @@
   const codexThreadScrollUserIntentVersion = "1";
   const codexProjectMoveRuntimeId = `${Date.now()}-${Math.random()}`;
   const codexMateChromeGateVersion = "3";
-  const codexMatePluginListPatchVersion = "5";
-  const codexMatePluginMarketplaceDefaultPatchVersion = "1";
+  const codexMatePluginListPatchVersion = "6";
+  const codexMatePluginMarketplaceDefaultPatchVersion = "2";
   const codexMateCuratedMarketplaceNames = new Set(["openai-curated", "openai-curated-remote", "codex-mate-curated"]);
+  const codexMateRoleSpecificMarketplaceNames = new Set(["role-specific-plugins", "codex-mate-role-specific-plugins"]);
   const codexMateModulePromises = window.__codexMateModulePromises || new Map();
   const codexMatePluginListRequestIds = window.__codexMatePluginListRequestIds || new Set();
 
@@ -2446,6 +2447,13 @@
       || (current.includes("/.codex/.tmp/plugins/.agents/plugins/marketplace.json") && !current.includes("/bundled-marketplaces/"));
   }
 
+  function isRoleSpecificPluginMarketplaceValue(value) {
+    const current = pluginMarketplaceValue(value).toLowerCase();
+    if (!current) return false;
+    return codexMateRoleSpecificMarketplaceNames.has(current)
+      || current.includes("/.codex/.tmp/role-specific-plugins/.agents/plugins/marketplace.json");
+  }
+
   function isOfficialPluginMarketplaceOption(option) {
     if (!option || typeof option !== "object") return false;
     const label = pluginMarketplaceText(option.label);
@@ -2610,6 +2618,7 @@
     if (name === "openai-curated-remote") return "codex-mate-openai-curated";
     if (name === "codex-mate-curated") return "codex-mate-openai-curated";
     if (name === "openai-primary-runtime") return "codex-mate-openai-primary-runtime";
+    if (name === "role-specific-plugins") return "codex-mate-role-specific-plugins";
     return "";
   }
 
@@ -2617,14 +2626,17 @@
     if (name === "openai-bundled") return "OpenAI Bundled";
     if (name === "openai-curated" || name === "openai-curated-remote" || name === "codex-mate-curated" || name === "codex-mate-openai-curated") return "Built by OpenAI";
     if (name === "openai-primary-runtime" || name === "codex-mate-openai-primary-runtime") return "OpenAI Runtime";
+    if (name === "role-specific-plugins" || name === "codex-mate-role-specific-plugins") return "Role-Specific Plugins";
     return fallback;
   }
 
   function restorePluginMarketplaceName(name) {
     if (name === "codex-mate-openai-curated") return "openai-curated";
     if (name === "codex-mate-openai-primary-runtime") return "openai-primary-runtime";
+    if (name === "codex-mate-role-specific-plugins") return "role-specific-plugins";
     if (name === "remote:codex-mate-openai-curated") return "remote:openai-curated";
     if (name === "remote:codex-mate-openai-primary-runtime") return "remote:openai-primary-runtime";
+    if (name === "remote:codex-mate-role-specific-plugins") return "remote:role-specific-plugins";
     return name;
   }
 
@@ -2635,17 +2647,24 @@
       || normalized === "openai-curated"
       || normalized === "openai-curated-remote"
       || normalized === "codex-mate-curated"
-      || normalized === "openai-primary-runtime";
+      || normalized === "openai-primary-runtime"
+      || normalized === "role-specific-plugins";
   }
 
   function normalizedCuratedPluginMarketplaceName(name, marketplacePath = "", displayName = "") {
     const current = String(name || "").trim();
     if (codexMateCuratedMarketplaceNames.has(current)) return "openai-curated";
+    if (codexMateRoleSpecificMarketplaceNames.has(current)) return "role-specific-plugins";
     if (current === "codex-mate-openai-curated") return "openai-curated";
     if (current === "codex-mate-openai-primary-runtime") return "openai-primary-runtime";
+    if (current === "codex-mate-role-specific-plugins") return "role-specific-plugins";
     if (isOfficialPluginMarketplaceValue(marketplacePath)) return "openai-curated";
+    if (isRoleSpecificPluginMarketplaceValue(marketplacePath)) return "role-specific-plugins";
     if (/^(Codex Official|OpenAI Curated|Built by OpenAI)$/i.test(pluginMarketplaceText(displayName))) {
       return "openai-curated";
+    }
+    if (/^Role-Specific Plugins$/i.test(pluginMarketplaceText(displayName))) {
+      return "role-specific-plugins";
     }
     return current;
   }
