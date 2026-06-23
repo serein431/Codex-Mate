@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from codex_mate import codex_storage
 from codex_mate.backup_store import BackupStore
 from codex_mate.models import DeleteResult, DeleteStatus, SessionRef
 
@@ -14,6 +15,7 @@ from codex_mate.models import DeleteResult, DeleteStatus, SessionRef
 class SQLiteStorageAdapter:
     def __init__(self, db_path: Path, backup_store: BackupStore):
         self.db_path = db_path
+        self.codex_home = codex_storage.codex_home_for_db_path(db_path) or db_path.parent
         self.backup_store = backup_store
 
     def supports_schema(self) -> bool:
@@ -31,6 +33,8 @@ class SQLiteStorageAdapter:
                 return DeleteResult(DeleteStatus.FAILED, session.session_id, "Unsupported local storage schema")
             if schema_kind == "codex_threads":
                 return self._delete_codex_thread(db, session)
+            if schema_kind == "codex_automation_runs":
+                return self._delete_codex_automation_run(db, session)
             return self._delete_generic_session(db, session)
 
     def undo(self, token: str) -> DeleteResult:
@@ -186,6 +190,20 @@ class SQLiteStorageAdapter:
 
         return self._local_deleted(thread_id, token)
 
+    def _delete_codex_automation_run(self, db: sqlite3.Connection, session: SessionRef) -> DeleteResult:
+        thread_id = self._normalize_codex_thread_id(session.session_id)
+        rows = self._select_dicts(db, "SELECT * FROM automation_runs WHERE thread_id = ?", (thread_id,))
+        if not rows:
+            return DeleteResult(DeleteStatus.FAILED, session.session_id, "Thread not found in local storage")
+        token = self.backup_store.write_backup(
+            session_id=thread_id,
+            source_db=str(self.db_path),
+            tables={"automation_runs": rows},
+        )
+        db.execute("DELETE FROM automation_runs WHERE thread_id = ?", (thread_id,))
+        db.commit()
+        return self._local_deleted(thread_id, token)
+
     def _delete_codex_ghost_thread(self, thread_id: str, original_session_id: str) -> DeleteResult:
         file_backups = self._rollout_file_backups([], thread_id)
         sidecar_has_refs = self._codex_sidecar_refs_exist(thread_id)
@@ -269,6 +287,10 @@ class SQLiteStorageAdapter:
             thread_cols = {row[1] for row in db.execute("PRAGMA table_info(threads)")}
             if {"id", "title", "rollout_path"}.issubset(thread_cols):
                 return "codex_threads"
+        if "automation_runs" in tables:
+            run_cols = {row[1] for row in db.execute("PRAGMA table_info(automation_runs)")}
+            if "thread_id" in run_cols:
+                return "codex_automation_runs"
         return None
 
     def _backup_related_rows(self, db: sqlite3.Connection, tables: dict[str, list[dict[str, Any]]], table: str, where: str, params: tuple[Any, ...]) -> None:
@@ -298,31 +320,29 @@ class SQLiteStorageAdapter:
         return file_backups
 
     def _session_files_for_thread(self, thread_id: str) -> list[Path]:
-        sessions_dir = self.db_path.parent / "sessions"
-        if not sessions_dir.exists():
-            return []
         variants = self._codex_thread_id_variants(thread_id)
         matches = []
-        for path in sorted(sessions_dir.rglob("rollout-*.jsonl")):
-            try:
-                with path.open("r", encoding="utf-8") as file:
-                    first_line = file.readline()
-            except OSError:
-                continue
-            if not first_line.strip():
-                continue
-            try:
-                item = json.loads(first_line)
-            except json.JSONDecodeError:
-                continue
-            payload = item.get("payload")
-            if item.get("type") == "session_meta" and isinstance(payload, dict) and str(payload.get("id") or "") in variants:
-                matches.append(path)
+        for sessions_dir in codex_storage.rollout_dirs(self.codex_home):
+            for path in sorted(sessions_dir.rglob("rollout-*.jsonl")):
+                try:
+                    with path.open("r", encoding="utf-8") as file:
+                        first_line = file.readline()
+                except OSError:
+                    continue
+                if not first_line.strip():
+                    continue
+                try:
+                    item = json.loads(first_line)
+                except json.JSONDecodeError:
+                    continue
+                payload = item.get("payload")
+                if item.get("type") == "session_meta" and isinstance(payload, dict) and str(payload.get("id") or "") in variants:
+                    matches.append(path)
         return matches
 
     def _codex_sidecar_file_backups(self) -> list[dict[str, str]]:
         backups = []
-        for path in (self.db_path.parent / "session_index.jsonl", self.db_path.parent / ".codex-global-state.json"):
+        for path in (self.codex_home / "session_index.jsonl", self.codex_home / ".codex-global-state.json"):
             if path.is_file():
                 backups.append({"path": str(path), "content_b64": base64.b64encode(path.read_bytes()).decode("ascii")})
         return backups
@@ -385,7 +405,7 @@ class SQLiteStorageAdapter:
         return changed
 
     def _move_thread_in_global_state(self, thread_id: str, target_cwd: str) -> str:
-        path = self.db_path.parent / ".codex-global-state.json"
+        path = self.codex_home / ".codex-global-state.json"
         state: dict[str, Any] = {}
         if path.exists():
             try:
@@ -431,7 +451,7 @@ class SQLiteStorageAdapter:
 
     def _codex_sidecar_refs_exist(self, thread_id: str) -> bool:
         variants = self._codex_thread_id_variants(thread_id)
-        index_path = self.db_path.parent / "session_index.jsonl"
+        index_path = self.codex_home / "session_index.jsonl"
         if index_path.exists():
             for line in index_path.read_text(encoding="utf-8").splitlines():
                 try:
@@ -440,7 +460,7 @@ class SQLiteStorageAdapter:
                     continue
                 if isinstance(item, dict) and str(item.get("id") or "") in variants:
                     return True
-        global_state_path = self.db_path.parent / ".codex-global-state.json"
+        global_state_path = self.codex_home / ".codex-global-state.json"
         if global_state_path.exists():
             try:
                 state = json.loads(global_state_path.read_text(encoding="utf-8"))
@@ -450,7 +470,7 @@ class SQLiteStorageAdapter:
         return False
 
     def _remove_thread_from_session_index(self, thread_id: str) -> None:
-        path = self.db_path.parent / "session_index.jsonl"
+        path = self.codex_home / "session_index.jsonl"
         if not path.exists():
             return
         variants = self._codex_thread_id_variants(thread_id)
@@ -470,7 +490,7 @@ class SQLiteStorageAdapter:
             self._atomic_write_text(path, "".join(kept_lines))
 
     def _remove_thread_from_global_state(self, thread_id: str, cwd: str = "") -> None:
-        path = self.db_path.parent / ".codex-global-state.json"
+        path = self.codex_home / ".codex-global-state.json"
         if not path.exists():
             return
         try:

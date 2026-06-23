@@ -75,6 +75,31 @@ def create_current_threads_db(home: Path) -> None:
         conn.close()
 
 
+def create_current_threads_db_at(path: Path, rows: list[tuple[str, str, str, str]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE threads (
+                id TEXT PRIMARY KEY,
+                title TEXT,
+                updated_at INTEGER,
+                archived INTEGER DEFAULT 0,
+                model_provider TEXT,
+                model TEXT
+            )
+            """
+        )
+        conn.executemany(
+            "INSERT INTO threads (id, title, updated_at, archived, model_provider, model) VALUES (?, ?, 100, 0, ?, ?)",
+            rows,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def create_threads_db_with_cwd(home: Path) -> None:
     conn = sqlite3.connect(home / "state_5.sqlite")
     try:
@@ -639,6 +664,81 @@ def test_sync_history_if_ready_syncs_when_profile_mismatches(tmp_path):
     assert result["skipped"] is False
     assert result["updated_database_rows"] == 2
     assert Path(result["backup_path"]).exists()
+
+
+def test_history_status_uses_new_sqlite_dir_and_counts_unique_threads(tmp_path):
+    home = tmp_path / ".codex"
+    write_config(home)
+    create_current_threads_db_at(
+        home / "sqlite" / "state_5.sqlite",
+        [
+            ("shared-thread", "Shared", "current_provider", "gpt-current"),
+            ("new-thread", "New", "current_provider", "gpt-current"),
+        ],
+    )
+    create_current_threads_db_at(
+        home / "state_5.sqlite",
+        [
+            ("shared-thread", "Shared", "old_provider", "gpt-old"),
+            ("legacy-only", "Legacy", "old_provider", "gpt-old"),
+        ],
+    )
+    (home / "sqlite" / "state_5.sqlite-wal").write_text("not a sqlite db", encoding="utf-8")
+
+    paths = history_sync.resolve_paths(home)
+    result = history_sync.status(paths)
+
+    assert paths.db_path == home / "sqlite" / "state_5.sqlite"
+    assert result["database_file_count"] == 2
+    assert result["database_paths"] == [str(home / "sqlite" / "state_5.sqlite"), str(home / "state_5.sqlite")]
+    assert result["total_threads"] == 3
+    assert result["mismatched_provider_threads"] == 2
+    assert result["mismatched_model_threads"] == 2
+
+    synced = history_sync.sync_history_if_ready(paths)
+
+    assert synced["skipped"] is False
+    assert synced["updated_database_rows"] == 2
+    assert synced["updated_database_files"] == 1
+    assert len(synced["database_backup_paths"]) == 2
+    with sqlite3.connect(home / "state_5.sqlite") as conn:
+        rows = conn.execute("SELECT model_provider, model, COUNT(*) FROM threads GROUP BY model_provider, model").fetchall()
+    assert rows == [("current_provider", "gpt-current", 2)]
+
+
+def test_history_sync_scans_archived_sessions(tmp_path):
+    home = tmp_path / ".codex"
+    write_config(home)
+    create_current_threads_db_at(
+        home / "sqlite" / "state_5.sqlite",
+        [("archived-thread", "Archived", "current_provider", "gpt-current")],
+    )
+    archived_dir = home / "archived_sessions" / "2026" / "01"
+    archived_dir.mkdir(parents=True)
+    rollout = archived_dir / "rollout-2026-01-01T00-00-00-archived-thread.jsonl"
+    rollout.write_text(
+        json.dumps(
+            {
+                "type": "session_meta",
+                "payload": {"id": "archived-thread", "model_provider": "old_provider", "model": "gpt-old"},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    paths = history_sync.resolve_paths(home)
+    result = history_sync.status(paths)
+
+    assert result["session_file_count"] == 1
+    assert result["mismatched_session_files"] == 1
+
+    synced = history_sync.sync_history_to_current_profile(paths)
+
+    assert synced["updated_session_files"] == 1
+    payload = json.loads(rollout.read_text(encoding="utf-8").strip())["payload"]
+    assert payload["model_provider"] == "current_provider"
+    assert payload["model"] == "gpt-current"
 
 
 def test_sync_history_visibility_if_ready_skips_heavy_sidebar_rewrites(tmp_path):

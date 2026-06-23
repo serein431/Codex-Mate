@@ -66,7 +66,7 @@ AI Agent 交流群：
 - 新增对话节点预览：CM 面板默认开启，右侧原点会展示当前会话里的用户提问位置。
 - 改进长对话定位：点击原点会先匹配当前已渲染消息，找不到时按完整进度滚动到附近，并在页面加载后继续重试定位。
 - 保留滚动位置恢复：节点跳转会短暂暂停恢复逻辑，避免刚跳到目标位置又被拉回上次阅读处。
-- 保持只读：节点预览只读取 `state_5.sqlite` 和 rollout 文件，不会改写聊天记录。
+- 保持只读：节点预览只读取本地 Codex sqlite 数据库和 rollout 文件，不会改写聊天记录。
 
 ## 2.0 更新重点
 
@@ -418,7 +418,7 @@ Codex Mate 会直接读取本机 `~/.cc-switch/cc-switch.db` 里的 `app_type = 
 
 ### Markdown 导出
 
-会话列表悬停时会出现“导出 Markdown”按钮。点击后，Codex Mate 会读取本机 `state_5.sqlite` 里的会话记录和对应 rollout 文件，把用户与助手消息整理成一个 `.md` 文件。
+会话列表悬停时会出现“导出 Markdown”按钮。点击后，Codex Mate 会读取本机 Codex sqlite 数据库里的会话记录和对应 rollout 文件，把用户与助手消息整理成一个 `.md` 文件。
 
 导出只读取本机已有聊天记录，不会上传内容，也不会改写 Codex 的数据库。
 
@@ -430,7 +430,7 @@ Codex Mate 会直接读取本机 `~/.cc-switch/cc-switch.db` 里的 `app_type = 
 
 ### 对话节点预览
 
-Codex Mate 会读取本机 `state_5.sqlite` 和当前会话对应的 rollout 文件，在右侧生成可点击的用户提问节点。节点不依赖当前页面已经渲染出多少条消息，所以长对话也能按完整进度定位。默认最多显示 30 条，避免超长会话把右侧原点堆满；可以在 CM 面板里调整最大显示条数。
+Codex Mate 会读取本机 Codex sqlite 数据库和当前会话对应的 rollout 文件，在右侧生成可点击的用户提问节点。节点不依赖当前页面已经渲染出多少条消息，所以长对话也能按完整进度定位。默认最多显示 30 条，避免超长会话把右侧原点堆满；可以在 CM 面板里调整最大显示条数。
 
 把指针放到原点上时会显示对应提问预览。点击原点时，Codex Mate 会先尝试匹配当前已经渲染出来的用户消息；如果目标消息还没挂载到页面里，会先按完整进度滚动到附近，再等待页面加载后继续定位。整个过程只读取本机数据，不会改写聊天记录。
 
@@ -462,8 +462,12 @@ Codex Mate 会读取：
 然后同步这些本地数据：
 
 ```text
+~/.codex/sqlite/*.db
+~/.codex/sqlite/*.sqlite
+~/.codex/sqlite/*.sqlite3
 ~/.codex/state_5.sqlite
 ~/.codex/sessions/**/rollout-*.jsonl
+~/.codex/archived_sessions/**/rollout-*.jsonl
 ~/.codex/session_index.jsonl
 ~/.codex/.codex-global-state.json
 ```
@@ -722,10 +726,14 @@ Codex Mate 可能读取或按需更新这些 Codex 本机文件：
 ```text
 ~/.codex/config.toml
 ~/.codex/auth.json
+~/.codex/sqlite/*.db
+~/.codex/sqlite/*.sqlite
+~/.codex/sqlite/*.sqlite3
 ~/.codex/state_5.sqlite
 ~/.codex/session_index.jsonl
 ~/.codex/.codex-global-state.json
 ~/.codex/sessions/**/rollout-*.jsonl
+~/.codex/archived_sessions/**/rollout-*.jsonl
 ```
 
 诊断包会做常见敏感字段脱敏，但如果要公开发到社区，建议再自己快速扫一眼。

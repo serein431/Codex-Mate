@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from codex_mate import codex_storage
 from codex_mate.models import SessionRef
 
 
@@ -37,18 +38,50 @@ def read_thread_rollout(db_path: Path | None, session: SessionRef) -> RolloutRea
     if not db_path.exists():
         return _failed(thread_id, f"数据库不存在：{db_path}", session.title)
 
-    try:
-        with sqlite3.connect(db_path) as db:
-            db.row_factory = sqlite3.Row
-            if not _supports_codex_threads(db):
-                return _failed(thread_id, "不支持当前本地存储结构", session.title)
-            row = db.execute("SELECT id, title, rollout_path FROM threads WHERE id = ?", (thread_id,)).fetchone()
-    except sqlite3.Error as exc:
-        return _failed(thread_id, f"读取数据库失败：{exc}", session.title)
+    unsupported_schema = False
+    last_error = ""
+    for candidate in rollout_db_candidates(db_path):
+        try:
+            with sqlite3.connect(candidate) as db:
+                db.row_factory = sqlite3.Row
+                if not _supports_codex_threads(db):
+                    unsupported_schema = True
+                    continue
+                row = db.execute("SELECT id, title, rollout_path FROM threads WHERE id = ?", (thread_id,)).fetchone()
+        except sqlite3.Error as exc:
+            last_error = str(exc)
+            continue
+        if row is not None:
+            return read_rollout_row(thread_id, row, session)
+    if last_error and not unsupported_schema:
+        return _failed(thread_id, f"读取数据库失败：{last_error}", session.title)
+    if unsupported_schema and not any_supports_codex_threads(rollout_db_candidates(db_path)):
+        return _failed(thread_id, "不支持当前本地存储结构", session.title)
+    return _failed(thread_id, "未找到对应会话", session.title)
 
-    if row is None:
-        return _failed(thread_id, "未找到对应会话", session.title)
 
+def rollout_db_candidates(db_path: Path) -> list[Path]:
+    paths = [db_path]
+    home = codex_storage.codex_home_for_db_path(db_path)
+    if home is not None:
+        for candidate in codex_storage.discover_thread_db_paths(home):
+            if candidate not in paths:
+                paths.append(candidate)
+    return paths
+
+
+def any_supports_codex_threads(paths: list[Path]) -> bool:
+    for path in paths:
+        try:
+            with sqlite3.connect(path) as db:
+                if _supports_codex_threads(db):
+                    return True
+        except sqlite3.Error:
+            continue
+    return False
+
+
+def read_rollout_row(thread_id: str, row: sqlite3.Row, session: SessionRef) -> RolloutReadResult:
     title = display_title(str(row["title"] or session.title or ""))
     rollout_path = str(row["rollout_path"] or "")
     if not rollout_path:
@@ -56,7 +89,6 @@ def read_thread_rollout(db_path: Path | None, session: SessionRef) -> RolloutRea
     path = Path(rollout_path)
     if not path.is_file():
         return _failed(thread_id, f"rollout 文件不存在：{rollout_path}", title)
-
     try:
         messages = load_rollout_messages(path)
     except (OSError, json.JSONDecodeError) as exc:

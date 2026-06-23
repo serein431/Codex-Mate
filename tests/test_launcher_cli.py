@@ -959,6 +959,65 @@ def test_cli_launch_checks_update_before_injection(monkeypatch):
     assert events == [("cleanup", 57321), "native-features", "history-sync", "check-update", "launch", "wait"]
 
 
+def test_cli_launch_defaults_to_discovered_thread_database(monkeypatch, tmp_path):
+    db_path = tmp_path / ".codex" / "sqlite" / "state_5.sqlite"
+    events = []
+    monkeypatch.setattr(cli.codex_storage, "primary_thread_db_path", lambda codex_home=None: db_path)
+    monkeypatch.setattr(cli, "stop_existing_windows_launchers_if_needed", lambda port: events.append(("cleanup", port)))
+    monkeypatch.setattr(cli, "sync_native_features_before_launch", lambda args: events.append(("native", args.db)))
+    monkeypatch.setattr(cli, "sync_history_before_launch", lambda args: events.append(("history", args.db)))
+    monkeypatch.setattr(cli, "launch_and_inject", lambda app_dir, db, *args: events.append(("launch", db)) or (FakeServer(), None))
+    monkeypatch.setattr(cli, "wait_for_shutdown", lambda server, proc: events.append("wait"))
+
+    exit_code = cli.main(["launch"])
+
+    assert exit_code == 0
+    assert events == [
+        ("cleanup", 57321),
+        ("native", db_path),
+        ("history", db_path),
+        ("launch", db_path),
+        "wait",
+    ]
+
+
+def test_cli_launch_keeps_explicit_database_path(monkeypatch, tmp_path):
+    explicit = tmp_path / "custom.sqlite"
+    events = []
+    monkeypatch.setattr(cli.codex_storage, "primary_thread_db_path", lambda codex_home=None: (_ for _ in ()).throw(AssertionError("should not discover")))
+    monkeypatch.setattr(cli, "stop_existing_windows_launchers_if_needed", lambda port: events.append(("cleanup", port)))
+    monkeypatch.setattr(cli, "sync_native_features_before_launch", lambda args: events.append(("native", args.db)))
+    monkeypatch.setattr(cli, "sync_history_before_launch", lambda args: events.append(("history", args.db)))
+    monkeypatch.setattr(cli, "launch_and_inject", lambda app_dir, db, *args: events.append(("launch", db)) or (FakeServer(), None))
+    monkeypatch.setattr(cli, "wait_for_shutdown", lambda server, proc: events.append("wait"))
+
+    exit_code = cli.main(["launch", "--db", str(explicit)])
+
+    assert exit_code == 0
+    assert events == [
+        ("cleanup", 57321),
+        ("native", explicit),
+        ("history", explicit),
+        ("launch", explicit),
+        "wait",
+    ]
+
+
+def test_sync_before_launch_uses_codex_home_for_sqlite_subdirectory(monkeypatch, tmp_path):
+    codex_home = tmp_path / ".codex"
+    db_path = codex_home / "sqlite" / "state_5.sqlite"
+    calls = []
+    args = type("Args", (), {"db": db_path})()
+    monkeypatch.setattr(cli.native_features, "ensure_remote_feature_flags", lambda home: calls.append(("native", home)) or {"status": "skipped"})
+    monkeypatch.setattr(cli.history_sync, "resolve_paths", lambda home: calls.append(("resolve", home)) or "paths")
+    monkeypatch.setattr(cli.history_sync, "sync_history_if_ready", lambda paths: calls.append(("history", paths)) or {"skipped": True})
+
+    cli.sync_native_features_before_launch(args)
+    cli.sync_history_before_launch(args)
+
+    assert calls == [("native", codex_home), ("resolve", codex_home), ("history", "paths")]
+
+
 def test_cli_update_notice_ignores_network_errors(monkeypatch, capsys):
     monkeypatch.setattr(cli.updater, "check_for_update", lambda: (_ for _ in ()).throw(RuntimeError("offline")))
 

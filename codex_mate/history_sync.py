@@ -10,6 +10,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterator
 
+from codex_mate import codex_storage
+
 
 UTC = timezone.utc
 DEFAULT_MODEL_PROVIDER = "openai"
@@ -20,7 +22,9 @@ class HistoryPaths:
     codex_home: Path
     config_path: Path
     db_path: Path
+    db_paths: tuple[Path, ...]
     sessions_dir: Path
+    session_dirs: tuple[Path, ...]
     session_index_path: Path
     global_state_path: Path
     backup_dir: Path
@@ -42,11 +46,18 @@ class SessionMetadata:
 
 def resolve_paths(codex_home: str | Path | None = None) -> HistoryPaths:
     home = Path(codex_home).expanduser() if codex_home is not None else Path.home() / ".codex"
+    discovered = tuple(codex_storage.discover_thread_db_paths(home))
+    primary = discovered[0] if discovered else codex_storage.primary_thread_db_path(home)
+    db_paths = discovered or ((primary,) if primary.exists() else tuple())
+    sessions_dir = home / "sessions"
+    session_dirs = tuple(codex_storage.rollout_dirs(home))
     return HistoryPaths(
         codex_home=home,
         config_path=home / "config.toml",
-        db_path=home / "state_5.sqlite",
-        sessions_dir=home / "sessions",
+        db_path=primary,
+        db_paths=db_paths,
+        sessions_dir=sessions_dir,
+        session_dirs=session_dirs,
         session_index_path=home / "session_index.jsonl",
         global_state_path=home / ".codex-global-state.json",
         backup_dir=home / "codex_mate_history_backups",
@@ -57,7 +68,7 @@ def environment_missing_reason(paths: HistoryPaths) -> str | None:
     missing = []
     if not paths.config_path.exists():
         missing.append(str(paths.config_path))
-    if not paths.db_path.exists():
+    if not paths.db_paths and not paths.db_path.exists():
         missing.append(str(paths.db_path))
     if missing:
         return "missing " + ", ".join(missing)
@@ -98,6 +109,21 @@ def backup_path(paths: HistoryPaths, label: str) -> Path:
     return paths.backup_dir / f"state_5.sqlite.{label}.{stamp}.bak"
 
 
+def database_paths(paths: HistoryPaths) -> tuple[Path, ...]:
+    if paths.db_paths:
+        return paths.db_paths
+    return (paths.db_path,) if paths.db_path.exists() else tuple()
+
+
+def extra_database_backup_path(paths: HistoryPaths, primary_backup: Path, db_path: Path) -> Path:
+    try:
+        relative = db_path.relative_to(paths.codex_home)
+    except ValueError:
+        relative = db_path.name
+    safe = str(relative).replace("/", "__").replace("\\", "__")
+    return primary_backup.with_name(f"{primary_backup.name}.{safe}.bak")
+
+
 def session_index_backup_path(db_backup: Path) -> Path:
     return db_backup.with_name(db_backup.name + ".session_index.jsonl")
 
@@ -110,11 +136,15 @@ def global_state_backup_path(db_backup: Path) -> Path:
     return db_backup.with_name(db_backup.name + ".codex-global-state.json")
 
 
-def make_backup(paths: HistoryPaths, label: str = "pre-sync") -> Path:
+def make_backup(paths: HistoryPaths, label: str = "pre-sync") -> tuple[Path, list[Path]]:
     paths.backup_dir.mkdir(parents=True, exist_ok=True)
     target = backup_path(paths, label)
-    with connect_db(paths.db_path, readonly=True) as source, connect_db(target) as dest:
-        source.backup(dest)
+    backed_up: list[Path] = []
+    for index, db_path in enumerate(database_paths(paths)):
+        backup_target = target if index == 0 else extra_database_backup_path(paths, target, db_path)
+        with connect_db(db_path, readonly=True) as source, connect_db(backup_target) as dest:
+            source.backup(dest)
+        backed_up.append(backup_target)
     if paths.session_index_path.exists():
         session_index_backup_path(target).write_text(paths.session_index_path.read_text(encoding="utf-8"), encoding="utf-8")
     if paths.global_state_path.exists():
@@ -123,13 +153,22 @@ def make_backup(paths: HistoryPaths, label: str = "pre-sync") -> Path:
         json.dumps(snapshot_session_meta(paths), ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
-    return target
+    return target, backed_up
 
 
 def iter_session_files(paths: HistoryPaths) -> list[Path]:
-    if not paths.sessions_dir.exists():
-        return []
-    return sorted(paths.sessions_dir.rglob("rollout-*.jsonl"))
+    seen: set[Path] = set()
+    files: list[Path] = []
+    dirs = paths.session_dirs or ((paths.sessions_dir,) if paths.sessions_dir.exists() else tuple())
+    for directory in dirs:
+        if not directory.exists():
+            continue
+        for path in sorted(directory.rglob("rollout-*.jsonl")):
+            if path in seen:
+                continue
+            seen.add(path)
+            files.append(path)
+    return files
 
 
 def split_first_line(text: str) -> tuple[str, str, str]:
@@ -264,59 +303,92 @@ def session_profile_status(paths: HistoryPaths, profile: CurrentProfile, thread_
 
 
 def update_database_threads(paths: HistoryPaths, profile: CurrentProfile) -> dict[str, object]:
-    with connect_db(paths.db_path) as conn:
-        if not table_exists(conn, "threads"):
-            return {"updated_database_rows": 0, "updated_fields": [], "skipped_database_sync": "missing threads table"}
-        conn.execute("BEGIN IMMEDIATE")
-        columns = table_columns(conn, "threads")
-        set_parts = ["model_provider = ?"]
-        set_values: list[str] = [profile.provider]
-        where_parts = ["model_provider IS NULL OR model_provider <> ?"]
-        where_values: list[str] = [profile.provider]
-        updated_fields = ["model_provider"]
-        if "model" in columns and profile.model:
-            set_parts.append("model = ?")
-            set_values.append(profile.model)
-            where_parts.append("model IS NULL OR model <> ?")
-            where_values.append(profile.model)
-            updated_fields.append("model")
-        changed = conn.execute(
-            f"UPDATE threads SET {', '.join(set_parts)} WHERE {' OR '.join(f'({part})' for part in where_parts)}",
-            (*set_values, *where_values),
-        ).rowcount
-        conn.commit()
-    return {"updated_database_rows": int(changed), "updated_fields": updated_fields}
+    total_changed = 0
+    changed_files = 0
+    skipped: list[str] = []
+    updated_fields: list[str] = []
+    for db_path in database_paths(paths):
+        with connect_db(db_path) as conn:
+            if not table_exists(conn, "threads"):
+                skipped.append(f"{db_path}: missing threads table")
+                continue
+            columns = table_columns(conn, "threads")
+            if "model_provider" not in columns:
+                skipped.append(f"{db_path}: missing model_provider column")
+                continue
+            conn.execute("BEGIN IMMEDIATE")
+            fields = ["model_provider"]
+            set_parts = ["model_provider = ?"]
+            set_values: list[str] = [profile.provider]
+            where_parts = ["model_provider IS NULL OR model_provider <> ?"]
+            where_values: list[str] = [profile.provider]
+            if "model" in columns and profile.model:
+                set_parts.append("model = ?")
+                set_values.append(profile.model)
+                where_parts.append("model IS NULL OR model <> ?")
+                where_values.append(profile.model)
+                fields.append("model")
+            changed = conn.execute(
+                f"UPDATE threads SET {', '.join(set_parts)} WHERE {' OR '.join(f'({part})' for part in where_parts)}",
+                (*set_values, *where_values),
+            ).rowcount
+            conn.commit()
+        if changed:
+            total_changed += int(changed)
+            changed_files += 1
+        for field in fields:
+            if field not in updated_fields:
+                updated_fields.append(field)
+    result: dict[str, object] = {
+        "updated_database_rows": total_changed,
+        "updated_database_files": changed_files,
+        "updated_fields": updated_fields,
+    }
+    if skipped:
+        result["skipped_database_sync"] = skipped
+    return result
 
 
 def repair_database_thread_timestamps(paths: HistoryPaths) -> dict[str, object]:
-    with connect_db(paths.db_path) as conn:
-        if not table_exists(conn, "threads"):
-            return {"updated_database_timestamps": 0, "skipped_database_timestamp_repair": "missing threads table"}
-        columns = table_columns(conn, "threads")
-        required = {"id", "rollout_path", "updated_at", "updated_at_ms"}
-        if not required.issubset(columns):
-            return {
-                "updated_database_timestamps": 0,
-                "skipped_database_timestamp_repair": "missing timestamp columns",
-            }
-        rows = conn.execute("SELECT id, rollout_path, updated_at, updated_at_ms FROM threads").fetchall()
-        updates: list[tuple[int, int, str]] = []
-        for row in rows:
-            rollout_path = row["rollout_path"]
-            if not rollout_path:
+    total_updates = 0
+    changed_files = 0
+    skipped: list[str] = []
+    for db_path in database_paths(paths):
+        with connect_db(db_path) as conn:
+            if not table_exists(conn, "threads"):
+                skipped.append(f"{db_path}: missing threads table")
                 continue
-            latest_timestamp = latest_session_timestamp_ms(Path(str(rollout_path)))
-            if latest_timestamp is None:
+            columns = table_columns(conn, "threads")
+            required = {"id", "rollout_path", "updated_at", "updated_at_ms"}
+            if not required.issubset(columns):
+                skipped.append(f"{db_path}: missing timestamp columns")
                 continue
-            current_ms = int(row["updated_at_ms"] or 0)
-            if latest_timestamp > current_ms:
-                updates.append((latest_timestamp // 1000, latest_timestamp, str(row["id"])))
-        if not updates:
-            return {"updated_database_timestamps": 0}
-        conn.execute("BEGIN IMMEDIATE")
-        conn.executemany("UPDATE threads SET updated_at = ?, updated_at_ms = ? WHERE id = ?", updates)
-        conn.commit()
-    return {"updated_database_timestamps": len(updates)}
+            rows = conn.execute("SELECT id, rollout_path, updated_at, updated_at_ms FROM threads").fetchall()
+            updates: list[tuple[int, int, str]] = []
+            for row in rows:
+                rollout_path = row["rollout_path"]
+                if not rollout_path:
+                    continue
+                latest_timestamp = latest_session_timestamp_ms(Path(str(rollout_path)))
+                if latest_timestamp is None:
+                    continue
+                current_ms = int(row["updated_at_ms"] or 0)
+                if latest_timestamp > current_ms:
+                    updates.append((latest_timestamp // 1000, latest_timestamp, str(row["id"])))
+            if not updates:
+                continue
+            conn.execute("BEGIN IMMEDIATE")
+            conn.executemany("UPDATE threads SET updated_at = ?, updated_at_ms = ? WHERE id = ?", updates)
+            conn.commit()
+        total_updates += len(updates)
+        changed_files += 1
+    result: dict[str, object] = {
+        "updated_database_timestamps": total_updates,
+        "updated_database_timestamp_files": changed_files,
+    }
+    if skipped:
+        result["skipped_database_timestamp_repair"] = skipped
+    return result
 
 
 def update_session_files(paths: HistoryPaths, profile: CurrentProfile) -> dict[str, object]:
@@ -469,38 +541,47 @@ def session_file_thread_ids(paths: HistoryPaths) -> set[str]:
     return ids
 
 
-def active_thread_index_entries(paths: HistoryPaths) -> list[dict[str, object]]:
-    with connect_db(paths.db_path, readonly=True) as conn:
-        if not table_exists(conn, "threads"):
-            return []
-        columns = table_columns(conn, "threads")
-        select_parts = ["id"]
-        if "title" in columns:
-            select_parts.append("title")
-        if "rollout_path" in columns:
-            select_parts.append("rollout_path")
-        if "updated_at" in columns:
-            select_parts.append("updated_at")
-        if "updated_at_ms" in columns:
-            select_parts.append("updated_at_ms")
-        where_sql = "WHERE archived = 0" if "archived" in columns else ""
-        order_terms = []
-        if "updated_at_ms" in columns:
-            order_terms.append("updated_at_ms")
-        if "updated_at" in columns:
-            order_terms.append("updated_at * 1000")
-        order_sql = f"ORDER BY COALESCE({', '.join(order_terms)}, 0) ASC, id ASC" if order_terms else "ORDER BY id ASC"
-        rows = conn.execute(
-            f"SELECT {', '.join(select_parts)} FROM threads {where_sql} {order_sql}"
-        ).fetchall()
+def select_thread_rows(paths: HistoryPaths, columns: list[str], *, active_only: bool) -> list[dict[str, object]]:
+    rows_by_id: dict[str, dict[str, object]] = {}
+    for db_path in database_paths(paths):
+        with connect_db(db_path, readonly=True) as conn:
+            if not table_exists(conn, "threads"):
+                continue
+            existing = table_columns(conn, "threads")
+            if "id" not in existing:
+                continue
+            select_parts = ["id", *(column for column in columns if column in existing)]
+            where_sql = "WHERE archived = 0" if active_only and "archived" in existing else ""
+            rows = conn.execute(f"SELECT {', '.join(select_parts)} FROM threads {where_sql}").fetchall()
+        for row in rows:
+            thread_id = str(row["id"])
+            if thread_id not in rows_by_id:
+                rows_by_id[thread_id] = dict(row)
+    return list(rows_by_id.values())
 
+
+def thread_row_sort_ms(row: dict[str, object]) -> int:
+    rollout_path = str(row.get("rollout_path") or "")
+    if rollout_path:
+        rollout_ms = latest_session_timestamp_ms(Path(rollout_path))
+        if rollout_ms is not None:
+            return rollout_ms
+    for key in ("updated_at_ms", "updated_at", "created_at_ms"):
+        value = row.get(key)
+        parsed = parse_timestamp_ms(value)
+        if parsed is not None:
+            return parsed
+    return 0
+
+
+def active_thread_index_entries(paths: HistoryPaths) -> list[dict[str, object]]:
+    rows = select_thread_rows(paths, ["title", "rollout_path", "updated_at", "updated_at_ms", "created_at_ms"], active_only=True)
+    rows.sort(key=lambda row: (thread_row_sort_ms(row), str(row["id"])))
     entries = []
     for row in rows:
-        title = str(row["title"]) if "title" in row.keys() and row["title"] else str(row["id"])
-        updated_at_ms = int(row["updated_at_ms"]) if "updated_at_ms" in row.keys() and row["updated_at_ms"] else None
-        updated_at = int(row["updated_at"]) if "updated_at" in row.keys() and row["updated_at"] else None
-        rollout_updated_at_ms = latest_session_timestamp_ms(Path(str(row["rollout_path"]))) if "rollout_path" in row.keys() and row["rollout_path"] else None
-        index_updated_at_ms = rollout_updated_at_ms or updated_at_ms
+        title = str(row.get("title") or row["id"])
+        index_updated_at_ms = thread_row_sort_ms(row)
+        updated_at = parse_timestamp_ms(row.get("updated_at"))
         entries.append(
             {
                 "id": str(row["id"]),
@@ -512,32 +593,14 @@ def active_thread_index_entries(paths: HistoryPaths) -> list[dict[str, object]]:
 
 
 def active_thread_ui_entries(paths: HistoryPaths) -> list[dict[str, object]]:
-    with connect_db(paths.db_path, readonly=True) as conn:
-        if not table_exists(conn, "threads"):
-            return []
-        columns = table_columns(conn, "threads")
-        select_parts = ["id"]
-        if "cwd" in columns:
-            select_parts.append("cwd")
-        if "updated_at" in columns:
-            select_parts.append("updated_at")
-        if "updated_at_ms" in columns:
-            select_parts.append("updated_at_ms")
-        where_sql = "WHERE archived = 0" if "archived" in columns else ""
-        order_terms = []
-        if "updated_at_ms" in columns:
-            order_terms.append("updated_at_ms")
-        if "updated_at" in columns:
-            order_terms.append("updated_at * 1000")
-        order_sql = f"ORDER BY COALESCE({', '.join(order_terms)}, 0) DESC, id ASC" if order_terms else "ORDER BY id ASC"
-        rows = conn.execute(f"SELECT {', '.join(select_parts)} FROM threads {where_sql} {order_sql}").fetchall()
-
+    rows = select_thread_rows(paths, ["cwd", "updated_at", "updated_at_ms", "created_at_ms"], active_only=True)
+    rows.sort(key=lambda row: (-thread_row_sort_ms(row), str(row["id"])))
     entries = []
     for row in rows:
         entries.append(
             {
                 "id": str(row["id"]),
-                "cwd": str(row["cwd"] or "") if "cwd" in row.keys() else "",
+                "cwd": str(row.get("cwd") or ""),
             }
         )
     return entries
@@ -701,7 +764,7 @@ def sync_history_to_current_profile(paths: HistoryPaths) -> dict[str, object]:
     if missing:
         raise RuntimeError(missing)
     profile = read_current_profile(paths)
-    db_backup = make_backup(paths)
+    db_backup, database_backups = make_backup(paths)
     db_result = update_database_threads(paths, profile)
     timestamp_result = repair_database_thread_timestamps(paths)
     session_result = update_session_files(paths, profile)
@@ -713,6 +776,7 @@ def sync_history_to_current_profile(paths: HistoryPaths) -> dict[str, object]:
         "current_provider": profile.provider,
         "current_model": profile.model,
         "backup_path": str(db_backup),
+        "database_backup_paths": [str(path) for path in database_backups],
         **db_result,
         **timestamp_result,
         **session_result,
@@ -726,7 +790,7 @@ def sync_history_visibility_to_current_profile(paths: HistoryPaths) -> dict[str,
     if missing:
         raise RuntimeError(missing)
     profile = read_current_profile(paths)
-    db_backup = make_backup(paths, "provider-switch")
+    db_backup, database_backups = make_backup(paths, "provider-switch")
     db_result = update_database_threads(paths, profile)
     session_result = update_session_files(paths, profile)
     return {
@@ -736,6 +800,7 @@ def sync_history_visibility_to_current_profile(paths: HistoryPaths) -> dict[str,
         "current_provider": profile.provider,
         "current_model": profile.model,
         "backup_path": str(db_backup),
+        "database_backup_paths": [str(path) for path in database_backups],
         **db_result,
         **session_result,
     }
@@ -781,45 +846,44 @@ def status(paths: HistoryPaths) -> dict[str, object]:
     if missing:
         return {"ok": True, "ready": False, "reason": missing}
     profile = read_current_profile(paths)
-    with connect_db(paths.db_path, readonly=True) as conn:
-        if not table_exists(conn, "threads"):
-            session_file_count = len(iter_session_files(paths))
-            return {
-                "ok": True,
-                "ready": True,
-                "current_provider": profile.provider,
-                "current_model": profile.model,
-                "total_threads": 0,
-                "mismatched_provider_threads": 0,
-                "mismatched_model_threads": None,
-                "session_file_count": session_file_count,
-                "session_index_count": len(read_session_index_entries(paths)),
-                "inspected_session_files": 0,
-                "mismatched_session_files": 0,
-                "session_files_missing_provider": 0,
-                "mismatched_session_model_files": 0,
-                "skipped_database_status": "missing threads table",
-            }
-        columns = table_columns(conn, "threads")
-        total = int(conn.execute("SELECT COUNT(*) FROM threads").fetchone()[0])
-        mismatched_provider = int(
-            conn.execute(
-                "SELECT COUNT(*) FROM threads WHERE model_provider IS NULL OR model_provider <> ?",
-                (profile.provider,),
-            ).fetchone()[0]
+    thread_records: dict[str, list[tuple[str | None, str | None]]] = {}
+    skipped_database_paths: list[str] = []
+    any_model_column = False
+    for db_path in database_paths(paths):
+        try:
+            with connect_db(db_path, readonly=True) as conn:
+                if not table_exists(conn, "threads"):
+                    skipped_database_paths.append(f"{db_path}: missing threads table")
+                    continue
+                columns = table_columns(conn, "threads")
+                if "id" not in columns:
+                    skipped_database_paths.append(f"{db_path}: missing id column")
+                    continue
+                any_model_column = any_model_column or "model" in columns
+                provider_expr = "model_provider" if "model_provider" in columns else "NULL AS model_provider"
+                model_expr = "model" if "model" in columns else "NULL AS model"
+                rows = conn.execute(f"SELECT id, {provider_expr}, {model_expr} FROM threads").fetchall()
+        except sqlite3.Error as exc:
+            skipped_database_paths.append(f"{db_path}: {exc}")
+            continue
+        for row in rows:
+            thread_id = str(row["id"])
+            provider = str(row["model_provider"] or "") or None
+            model = str(row["model"] or "") if row["model"] else None
+            thread_records.setdefault(thread_id, []).append((provider, model))
+    thread_ids = set(thread_records)
+    total = len(thread_ids)
+    mismatched_provider = sum(
+        1 for records in thread_records.values() if any(provider != profile.provider for provider, _ in records)
+    )
+    mismatched_model = None
+    if profile.model and any_model_column:
+        mismatched_model = sum(
+            1 for records in thread_records.values() if any(model != profile.model for _, model in records)
         )
-        mismatched_model = None
-        if "model" in columns and profile.model:
-            mismatched_model = int(
-                conn.execute(
-                    "SELECT COUNT(*) FROM threads WHERE model IS NULL OR model <> ?",
-                    (profile.model,),
-                ).fetchone()[0]
-            )
-        thread_ids = {str(row["id"]) for row in conn.execute("SELECT id FROM threads").fetchall()} if "id" in columns else set()
     session_file_count = len(iter_session_files(paths))
     session_status = session_profile_status(paths, profile, thread_ids)
-    return {
+    payload: dict[str, object] = {
         "ok": True,
         "ready": True,
         "current_provider": profile.provider,
@@ -827,7 +891,13 @@ def status(paths: HistoryPaths) -> dict[str, object]:
         "total_threads": total,
         "mismatched_provider_threads": mismatched_provider,
         "mismatched_model_threads": mismatched_model,
+        "database_file_count": len(database_paths(paths)),
+        "database_paths": [str(path) for path in database_paths(paths)],
+        "skipped_database_paths": skipped_database_paths,
         "session_file_count": session_file_count,
         "session_index_count": len(read_session_index_entries(paths)),
         **session_status,
     }
+    if total == 0 and skipped_database_paths:
+        payload["skipped_database_status"] = skipped_database_paths
+    return payload

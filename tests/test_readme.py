@@ -189,11 +189,11 @@ def test_readme_describes_export_cc_switch_and_scroll_restore():
     assert "~/.cc-switch/cc-switch.db" in text
     assert "## 功能说明" in text
     assert "### Markdown 导出" in text
-    assert "读取本机 `state_5.sqlite`" in text
+    assert "读取本机 Codex sqlite 数据库" in text
     assert "### 会话移动" in text
     assert "侧边栏里已有的项目" in text
     assert "### 对话节点预览" in text
-    assert "读取本机 `state_5.sqlite` 和当前会话对应的 rollout 文件" in text
+    assert "读取本机 Codex sqlite 数据库和当前会话对应的 rollout 文件" in text
     assert "右侧原点" in text
     assert "默认最多显示 30 条" in text
     assert "### 滚动位置恢复" in text

@@ -115,6 +115,32 @@ def test_delete_codex_thread_schema_removes_codex_sidecar_indexes(tmp_path):
     assert "keep" in global_state
 
 
+def test_delete_codex_thread_schema_uses_codex_home_for_sidecars_when_db_is_under_sqlite(tmp_path):
+    home = tmp_path / ".codex"
+    db_path = home / "sqlite" / "state_5.sqlite"
+    rollout_path = home / "sessions" / "2026" / "05" / "rollout.jsonl"
+    db_path.parent.mkdir(parents=True)
+    rollout_path.parent.mkdir(parents=True)
+    rollout_path.write_text('{"type":"message"}\n', encoding="utf-8")
+    create_codex_thread_db(db_path, rollout_path)
+    (home / "session_index.jsonl").write_text(
+        '{"id":"t1","thread_name":"Codex Thread","updated_at":"2026-05-02T00:00:00Z"}\n',
+        encoding="utf-8",
+    )
+    (home / ".codex-global-state.json").write_text(
+        '{"projectless-thread-ids":["t1"],"thread-workspace-root-hints":{"t1":"/tmp/project"}}\n',
+        encoding="utf-8",
+    )
+    adapter = SQLiteStorageAdapter(db_path, BackupStore(tmp_path / "backups"))
+
+    result = adapter.delete_local(SessionRef(session_id="t1", title="Codex Thread"))
+
+    assert result.status == DeleteStatus.LOCAL_DELETED
+    assert (home / "session_index.jsonl").read_text(encoding="utf-8") == ""
+    assert "t1" not in (home / ".codex-global-state.json").read_text(encoding="utf-8")
+    assert not (home / "sqlite" / "session_index.jsonl").exists()
+
+
 def test_delete_codex_thread_schema_removes_thread_objects_from_global_state_lists(tmp_path):
     db_path = tmp_path / "state_5.sqlite"
     rollout_path = tmp_path / "rollout.jsonl"
@@ -208,6 +234,41 @@ def test_delete_codex_thread_schema_finds_rollout_file_by_session_meta_id(tmp_pa
 
     assert result.status == DeleteStatus.LOCAL_DELETED
     assert not session_file.exists()
+
+
+def test_delete_codex_thread_schema_finds_archived_rollout_file_by_session_meta_id(tmp_path):
+    db_path = tmp_path / "state_5.sqlite"
+    stale_rollout_path = tmp_path / "missing-rollout.jsonl"
+    create_codex_thread_db(db_path, stale_rollout_path)
+    session_file = tmp_path / "archived_sessions" / "2026" / "05" / "12" / "rollout-2026-05-12T00-00-00-t1.jsonl"
+    session_file.parent.mkdir(parents=True)
+    session_file.write_text('{"type":"session_meta","payload":{"id":"t1","cwd":"/tmp/project"}}\n', encoding="utf-8")
+    adapter = SQLiteStorageAdapter(db_path, BackupStore(tmp_path / "backups"))
+
+    result = adapter.delete_local(SessionRef(session_id="local:t1", title="Codex Thread"))
+
+    assert result.status == DeleteStatus.LOCAL_DELETED
+    assert not session_file.exists()
+
+
+def test_delete_automation_run_schema_creates_backup_and_can_undo(tmp_path):
+    db_path = tmp_path / "codex-dev.db"
+    with sqlite3.connect(db_path) as db:
+        db.execute("CREATE TABLE automation_runs (thread_id TEXT NOT NULL, thread_title TEXT, status TEXT)")
+        db.execute("INSERT INTO automation_runs (thread_id, thread_title, status) VALUES ('t1', 'Automation Thread', 'complete')")
+    adapter = SQLiteStorageAdapter(db_path, BackupStore(tmp_path / "backups"))
+
+    deleted = adapter.delete_local(SessionRef(session_id="local:t1", title="Automation Thread"))
+
+    assert deleted.status == DeleteStatus.LOCAL_DELETED
+    with sqlite3.connect(db_path) as db:
+        assert db.execute("SELECT COUNT(*) FROM automation_runs WHERE thread_id = 't1'").fetchone()[0] == 0
+
+    restored = adapter.undo(deleted.undo_token or "")
+
+    assert restored.status == DeleteStatus.UNDONE
+    with sqlite3.connect(db_path) as db:
+        assert db.execute("SELECT status FROM automation_runs WHERE thread_id = 't1'").fetchone()[0] == "complete"
 
 
 def test_delete_codex_thread_schema_removes_sidecar_only_ghost_thread(tmp_path):

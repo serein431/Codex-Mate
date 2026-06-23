@@ -10,6 +10,7 @@ import time
 import traceback
 from pathlib import Path
 
+from codex_mate import codex_storage
 from codex_mate.helper_server import HelperServer
 from codex_mate.installers import InstallOptions, install_codex_mate, uninstall_codex_mate
 from codex_mate.launcher import launch_and_inject, shutdown_helper
@@ -24,7 +25,7 @@ from codex_mate import watcher
 
 def add_launch_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--app-dir", type=Path, default=None)
-    parser.add_argument("--db", type=Path, default=Path.home() / ".codex" / "state_5.sqlite", help="SQLite database path for local deletion fallback")
+    parser.add_argument("--db", type=Path, default=None, help="SQLite database path for local deletion fallback")
     parser.add_argument("--backup-dir", type=Path, default=Path.home() / ".codex-mate" / "backups")
     parser.add_argument("--debug-port", type=int, default=9229)
     parser.add_argument("--helper-port", type=int, default=57321)
@@ -230,6 +231,7 @@ def stop_existing_windows_launchers_if_needed(helper_port: int) -> None:
 
 
 def run_launch(args: argparse.Namespace) -> int:
+    args.db = resolve_launch_db_path(args)
     stop_existing_windows_launchers_if_needed(args.helper_port)
     if not args.no_native_feature_sync:
         sync_native_features_before_launch(args)
@@ -247,9 +249,15 @@ def run_launch(args: argparse.Namespace) -> int:
     return 0
 
 
+def resolve_launch_db_path(args: argparse.Namespace) -> Path | None:
+    if getattr(args, "db", None) is not None:
+        return args.db
+    return codex_storage.primary_thread_db_path()
+
+
 def sync_native_features_before_launch(args: argparse.Namespace) -> None:
     try:
-        codex_home = args.db.parent if getattr(args, "db", None) else None
+        codex_home = codex_storage.codex_home_for_db_path(args.db) if getattr(args, "db", None) else None
         result = native_features.ensure_remote_feature_flags(codex_home)
     except Exception as exc:
         append_launch_warning("native feature sync failed before launch: " + str(exc))
@@ -263,7 +271,7 @@ def sync_native_features_before_launch(args: argparse.Namespace) -> None:
 
 def sync_history_before_launch(args: argparse.Namespace) -> None:
     try:
-        codex_home = args.db.parent if getattr(args, "db", None) else None
+        codex_home = codex_storage.codex_home_for_db_path(args.db) if getattr(args, "db", None) else None
         result = history_sync.sync_history_if_ready(history_sync.resolve_paths(codex_home))
     except Exception as exc:
         append_launch_warning("history sync failed before launch: " + str(exc))

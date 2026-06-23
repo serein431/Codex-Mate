@@ -40,6 +40,28 @@ def test_rollout_reader_reads_thread_and_rollout_messages(tmp_path):
     assert result.messages[0].timestamp == "2026-05-23 16:00:00"
 
 
+def test_rollout_reader_finds_thread_in_other_db_under_same_codex_home(tmp_path):
+    home = tmp_path / ".codex"
+    rollout = home / "sessions" / "2026" / "05" / "rollout.jsonl"
+    rollout.parent.mkdir(parents=True)
+    rollout.write_text(
+        '{"type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"你好"}]}}\n',
+        encoding="utf-8",
+    )
+    primary_db = home / "sqlite" / "state_5.sqlite"
+    primary_db.parent.mkdir(parents=True)
+    with sqlite3.connect(primary_db) as db:
+        db.execute("CREATE TABLE threads (id TEXT PRIMARY KEY, title TEXT, rollout_path TEXT)")
+    legacy_db = home / "state_5.sqlite"
+    create_thread_db(legacy_db, rollout)
+
+    result = read_thread_rollout(primary_db, SessionRef(session_id="t1", title="Fallback"))
+
+    assert result.status == "ready"
+    assert result.title == "Thread One"
+    assert result.rollout_path == str(rollout)
+
+
 def test_rollout_reader_keeps_empty_user_message_for_timeline(tmp_path):
     rollout = tmp_path / "rollout.jsonl"
     rollout.write_text(
