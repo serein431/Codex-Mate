@@ -282,14 +282,11 @@ def test_bridge_routes_export_and_backend_status(tmp_path):
     assert status == {"status": "ok"}
 
 
-def test_bridge_routes_conversation_timeline(tmp_path):
+def test_bridge_does_not_route_conversation_timeline(tmp_path):
     class Service:
-        def conversation_timeline(self, session):
-            return {"status": "ready", "session_id": session.session_id, "title": session.title, "items": []}
+        pass
 
-    timeline = launcher.handle_bridge_request(Service(), "/conversation-timeline", {"session_id": "s1", "title": "First"})
-
-    assert timeline == {"status": "ready", "session_id": "s1", "title": "First", "items": []}
+    assert launcher.handle_bridge_request(Service(), "/conversation-timeline", {"session_id": "s1"}) == {"error": "not found"}
 
 
 def test_bridge_routes_auth_enhancement_mode(tmp_path):
@@ -389,8 +386,7 @@ def test_bridge_rejects_removed_file_tree_requests(tmp_path):
 
     result = launcher.handle_bridge_request(Service(), "/file-tree/roots", {"thread_id": "local:t1"})
 
-    assert result["status"] == "failed"
-    assert result["message"] == "Unknown bridge path"
+    assert result == {"error": "not found"}
 
 
 def test_launch_codex_windows_allows_devtools_websocket_origin(monkeypatch):
@@ -1010,12 +1006,13 @@ def test_sync_before_launch_uses_codex_home_for_sqlite_subdirectory(monkeypatch,
     args = type("Args", (), {"db": db_path})()
     monkeypatch.setattr(cli.native_features, "ensure_remote_feature_flags", lambda home: calls.append(("native", home)) or {"status": "skipped"})
     monkeypatch.setattr(cli.history_sync, "resolve_paths", lambda home: calls.append(("resolve", home)) or "paths")
-    monkeypatch.setattr(cli.history_sync, "sync_history_if_ready", lambda paths: calls.append(("history", paths)) or {"skipped": True})
+    monkeypatch.setattr(cli.history_sync, "sync_history_if_ready", lambda paths: (_ for _ in ()).throw(AssertionError("full history sync should not run before launch")))
+    monkeypatch.setattr(cli.history_sync, "sync_history_visibility_if_ready", lambda paths: calls.append(("history-visibility", paths)) or {"skipped": True})
 
     cli.sync_native_features_before_launch(args)
     cli.sync_history_before_launch(args)
 
-    assert calls == [("native", codex_home), ("resolve", codex_home), ("history", "paths")]
+    assert calls == [("native", codex_home), ("resolve", codex_home), ("history-visibility", "paths")]
 
 
 def test_cli_update_notice_ignores_network_errors(monkeypatch, capsys):
@@ -1172,6 +1169,29 @@ def test_cli_history_sync_prints_json(monkeypatch, tmp_path, capsys):
     assert exit_code == 0
     assert calls == [tmp_path]
     assert '"updated_database_rows": 2' in capsys.readouterr().out
+
+
+def test_cli_provider_sync_prints_json(monkeypatch, tmp_path, capsys):
+    calls = []
+    monkeypatch.setattr(cli.history_sync, "resolve_paths", lambda codex_home: calls.append(codex_home) or "paths")
+    monkeypatch.setattr(
+        cli.history_sync,
+        "sync_history_to_current_profile",
+        lambda paths: (_ for _ in ()).throw(AssertionError("full history sync should not run from provider-sync")),
+    )
+    monkeypatch.setattr(
+        cli.history_sync,
+        "sync_history_visibility_if_ready",
+        lambda paths: {"ok": True, "visibility_only": True, "updated_database_rows": 1, "paths": paths},
+    )
+
+    exit_code = cli.main(["provider-sync", "--codex-home", str(tmp_path), "--json"])
+
+    assert exit_code == 0
+    assert calls == [tmp_path]
+    output = capsys.readouterr().out
+    assert '"visibility_only": true' in output
+    assert '"updated_database_rows": 1' in output
 
 
 def test_cli_provider_mode_status_prints_json(monkeypatch, tmp_path, capsys):

@@ -268,8 +268,8 @@ def test_renderer_script_chat_filter_keeps_relevant_node_escape_hatch():
     assert "button[aria-label=\"已归档对话\"]" in relevant_code
     assert "button:disabled.w-full.justify-center" in relevant_code
     assert "[role=\"button\"][aria-disabled=\"true\"].cursor-not-allowed" in relevant_code
-    assert "[data-local-conversation-user-anchor=\"true\"]" in relevant_code
-    assert "[data-content-search-unit-key$=\":user\"]" in relevant_code
+    assert "[data-local-conversation-user-anchor=\"true\"]" not in relevant_code
+    assert "[data-content-search-unit-key$=\":user\"]" not in relevant_code
 
 
 def test_renderer_script_clears_focus_and_removes_deleted_rows():
@@ -519,113 +519,29 @@ def test_renderer_script_adds_session_move_contract():
     assert "移动会话" in text
 
 
-def test_renderer_script_adds_conversation_timeline_and_scroll_restore():
+def test_renderer_script_removes_conversation_timeline_and_keeps_scroll_restore():
     text = Path("codex_mate/inject/renderer-inject.js").read_text(encoding="utf-8")
 
-    assert "conversationTimeline: true" in text
-    assert "conversationTimelineMaxItems: 30" in text
     assert "threadScrollRestore: true" in text
-    assert "codex-conversation-timeline" in text
-    assert "function refreshConversationTimeline" in text
-    assert "function conversationTimelineQuestions" in text
-    assert "function createConversationTimelineMarker" in text
-    assert 'data-local-conversation-user-anchor="true"' in text
-    assert 'data-content-search-unit-key$=":user"' in text
-    assert "function timelineQuestionTargetNode" in text
-    assert "const target = timelineQuestionTargetNode(node)" in text
-    assert 'node.querySelector(".whitespace-pre-wrap")' in text
-    assert "function findMountedTimelineTargetByTurnId" in text
-    assert "item?.turn_id" in text
-    assert 'data-turn-key="${escapedTurnId}"' in text
-    assert "findMountedTimelineTargetByTurnId(item)" in text
-    assert 'node.closest(\'[data-testid="conversation-turn"]\') || node' not in text
-    assert "对话节点预览" in text
-    assert 'postJson("/conversation-timeline", ref)' in text
-    assert "conversationTimelineCache" in text
-    assert "conversationTimelineMaxItems(settings" in text
-    assert "limitedConversationTimelineItems" in text
-    assert "data-codex-mate-setting-number=\"conversationTimelineMaxItems\"" in text
-    assert "positionTimelineTooltip" in text
-    assert "timelineScrollerIsReversed" in text
-    assert "timelineTargetScrollTop" in text
-    assert "function removeStaleConversationTimeline" in text
-    assert "removeStaleConversationTimeline()" in text
-    assert "__codexConversationTimelineRuntimeVersion" in text
-    assert "__codexConversationTimelineRuntimeVersion !== codexConversationTimelineVersion" in text
-    assert "existingRoot?.dataset.codexConversationTimelineVersion === codexConversationTimelineVersion" in text
-    assert "marker.dataset.previewOpen = \"true\"" in text
-    assert "tooltip.dataset.previewOpen = \"true\"" in text
-    assert "delete marker.dataset.previewOpen" in text
-    assert "delete tooltip.dataset.previewOpen" in text
-    assert "document.body.appendChild(tooltip)" in text
-    assert "marker.title" not in text
-    assert ".${timelineTooltipClass}" in text
-    assert 'marker.addEventListener("pointerup", activateMarker, true)' in text
-    assert 'marker.addEventListener("click", activateMarker, true)' in text
-    assert 'marker.addEventListener("pointerleave", hideMarkerTooltip, true)' in text
-    assert "position: fixed;" in text
-    assert "z-index: 2147482502;" in text
-    assert "const timelineQuestionLimit = 96" in text
-    assert "max-width: min(520px, calc(100vw - 96px));" in text
-    assert "white-space: nowrap;" in text
-    assert "text-overflow: ellipsis;" in text
-    assert "-webkit-line-clamp" not in text
-    assert "transition: none;" in text
-    assert "--codex-timeline-surface: rgba(17,24,39,.96);" in text
-    assert "--codex-timeline-surface: rgba(255,255,255,.98);" in text
-    assert "@media (prefers-color-scheme: dark)" in text
-    assert 'data-preview-open="true"' in text
-    assert "timelineToggleClass" in text
-    assert "timelinePanelClass" in text
-    assert "timelineItemClass" in text
-    assert "codex-conversation-timeline-toggle" in text
-    assert "codex-conversation-timeline-panel" in text
-    assert "codex-conversation-timeline-item" in text
-    assert "createConversationTimelineToggle" in text
-    assert "createConversationTimelineItem" in text
-    assert "setConversationTimelinePanelOpen" in text
-    assert 'root.dataset.panelOpen = "false"' in text
-    assert 'root.appendChild(toggle)' in text
-    assert 'panel.appendChild(createConversationTimelineItem(item, index, root))' in text
-    assert 'setConversationTimelinePanelOpen(root, false)' in text
-    assert "pointer-events: none;" in text
-    assert "right: 12px;" in text
-    assert "width: 48px;" in text
-    assert "height: 44px;" in text
-    assert 'button.textContent = "目录"' in text
-    assert 'right: 58px;' in text
-    assert "root.appendChild(marker)" not in text
-    assert "root.appendChild(track)" not in text
-    assert "installConversationTimelineHoverStabilizer" not in text
-    assert "scheduleConversationTimelineClose" not in text
-    assert "background: var(--codex-timeline-surface)" in text
-    assert "approximateScrollTimelineTarget" in text
-    assert "function timelineCurrentScrollPercent" in text
-    assert "function backendTimelineItemsForCurrentSession" in text
-    assert "function uniqueBackendTimelineMatch" in text
-    assert "function timelineCalibrationAnchor" in text
-    assert "function calibratedTimelineTargetPercent" in text
-    assert "timelineItemReferencePercent(item)" in text
-    assert 'approximateScrollTimelineTarget(item, { calibrated: true, behavior: "auto" })' in text
-    assert "retryResolveTimelineTarget" in text
-    assert "clearConversationTimelineRetryTimers" in text
-    assert "scheduleConversationTimelineRetry" in text
-    assert "__codexConversationTimelineRetryTimers" in text
-    assert "markTimelineProgrammaticScroll" in text
-    assert "function timelineItemIndex" in text
-    assert "function selectTimelineTargetCandidate" in text
-    assert "question.visibleIndex === targetIndex" in text
-    assert "candidateDistanceToViewportCenter" in text
-    assert "findMountedTimelineTarget(item, { allowAmbiguous: false })" in text
-    assert "findMountedTimelineTarget(item, { allowAmbiguous: true })" in text
-    assert "threadScrollTargetTop(scroller, nextTop)" in text
-    assert "const questions = prepareTimelineQuestions(conversationTimelineQuestions())" not in text
+    assert "function removeLegacyConversationTimeline" in text
+    assert '".codex-conversation-timeline, .codex-conversation-timeline-tooltip"' in text
     assert "function readThreadScrollEntries" in text
     assert "function saveThreadScrollPositionNow" in text
     assert "function restoreThreadScrollPosition" in text
     assert "installThreadScrollRouteHooks" in text
     assert "localStorage.setItem(codexThreadScrollKey" in text
-    assert '[data-local-conversation-user-anchor="true"]' in text
+    assert "conversationTimeline:" not in text
+    assert "conversationTimelineMaxItems" not in text
+    assert 'postJson("/conversation-timeline"' not in text
+    assert "function refreshConversationTimeline" not in text
+    assert "function conversationTimelineQuestions" not in text
+    assert "function createConversationTimelineMarker" not in text
+    assert "timelineToggleClass" not in text
+    assert "timelinePanelClass" not in text
+    assert "timelineItemClass" not in text
+    assert "__codexConversationTimelineRuntimeVersion" not in text
+    assert "对话节点预览" not in text
+    assert "完整对话目录" not in text
 
 
 def test_renderer_script_adds_backend_status_contract():
@@ -738,10 +654,10 @@ def test_renderer_script_does_not_include_fast_mode_patch():
     assert '"forceInject"' in text
     assert "会话删除" in text
     assert "Markdown 导出" in text
-    assert "对话节点预览" in text
-    assert 'data-codex-mate-setting="conversationTimeline"' in text
     assert "滚动位置恢复" in text
     assert "原生菜单栏位置" in text
+    assert "对话节点预览" not in text
+    assert 'data-codex-mate-setting="conversationTimeline"' not in text
     assert "nativeMenuPlacement: true" in text
     assert "关于 Codex Mate" in text
     assert "https://github.com/serein431/Codex-Mate" in text

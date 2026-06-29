@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "codex-mate"
-version = "2.1.7"
+version = "2.1.8"
 description = "External Codex App companion launcher"
 license = {file = "LICENSE"}
 requires-python = ">=3.11"

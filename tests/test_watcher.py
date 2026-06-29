@@ -143,6 +143,25 @@ def test_watch_loop_checks_history_when_cdp_and_helper_are_up(monkeypatch, tmp_p
     assert events == [("sync-history", "while CDP/helper are up", {"log_skipped": True})]
 
 
+def test_sync_history_for_watcher_uses_visibility_sync(monkeypatch):
+    calls = []
+    monkeypatch.setattr(watcher.history_sync, "resolve_paths", lambda: calls.append(("resolve", None)) or "paths")
+    monkeypatch.setattr(
+        watcher.history_sync,
+        "sync_history_if_ready",
+        lambda paths: (_ for _ in ()).throw(AssertionError("full history sync should not run in watcher")),
+    )
+    monkeypatch.setattr(
+        watcher.history_sync,
+        "sync_history_visibility_if_ready",
+        lambda paths: calls.append(("history-visibility", paths)) or {"skipped": True, "reason": "already synced"},
+    )
+
+    watcher.sync_history_for_watcher("during test")
+
+    assert calls == [("resolve", None), ("history-visibility", "paths")]
+
+
 def test_macos_takeover_uses_longer_grace_and_backoff(monkeypatch):
     monkeypatch.setattr(watcher.sys, "platform", "darwin")
 

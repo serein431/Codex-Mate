@@ -51,22 +51,21 @@ AI Agent 交流群：
 - 在会话列表悬停显示“删除”按钮
 - 在会话列表悬停导出当前对话为 Markdown
 - 在会话列表悬停移动会话到普通对话或其他项目
-- 对话节点预览：读取本地 rollout，在右侧显示可跳转问题节点
 - 删除前确认，并支持撤销
 - CM 面板内支持 CC Switch 速切，直接读取本机 Codex 供应商
 - 记住每个会话的滚动位置，切回会话时尽量回到上次阅读处
-- 切换账号、provider 或模型后，帮助恢复本机已有聊天记录的侧边栏显示
+- 切换账号或 provider 后，帮助恢复本机已有聊天记录的侧边栏显示
 - 支持官方登录、官方登录混入 API Key、纯 API 三种 provider 模式
 - 支持 Windows / macOS 安装、更新、卸载和诊断日志导出
 
 ## 2.1 更新重点
 
-2.1 重点修复长对话导航问题：不再只依赖当前页面已经渲染出来的几条消息，而是读取本机 rollout 文件生成右侧问题节点。
+2.1 重点处理 Codex 更新后的历史可见性问题，并移除 Codex Mate 自己注入的右侧目录。
 
-- 新增对话节点预览：CM 面板默认开启，右侧原点会展示当前会话里的用户提问位置。
-- 改进长对话定位：点击原点会先匹配当前已渲染消息，找不到时按完整进度滚动到附近，并在页面加载后继续重试定位。
-- 保留滚动位置恢复：节点跳转会短暂暂停恢复逻辑，避免刚跳到目标位置又被拉回上次阅读处。
-- 保持只读：节点预览只读取本地 Codex sqlite 数据库和 rollout 文件，不会改写聊天记录。
+- 自动启动、watcher 和 CC Switch 切换后只做轻量 provider 可见性修复，不再批量改时间、索引或全局状态。
+- 写入 rollout 后会恢复原文件修改时间，避免 Codex 把多条会话误判成同一更新时间。
+- 自动修复加了本机锁，减少 launcher、watcher 和供应商切换同时写历史的风险。
+- Codex 新版已经自带上下文目录，Codex Mate 不再额外注入右侧目录；滚动位置恢复继续保留。
 
 ## 2.0 更新重点
 
@@ -406,7 +405,7 @@ python -m codex_mate provider-mode pure-api \
 
 如果你已经使用 CC Switch 管理 Codex 供应商，CM 面板会在“供应商配置”上方显示“CC Switch 速切”。
 
-Codex Mate 会直接读取本机 `~/.cc-switch/cc-switch.db` 里的 `app_type = "codex"` 供应商，展示名称、当前启用状态、模式、Base URL、Wire API 和 API Key 是否存在。点击“切换”后，Codex Mate 会按当前模式写入 Codex 配置：保留官方登录态时只更新 `config.toml` 里的当前 provider；纯 API 兼容模式才会写入 `auth.json`。切换成功后会同步 CC Switch 的当前供应商状态，并执行一次轻量历史可见性同步：只对齐 provider/model 和 rollout 首行元数据，不做时间戳修复或侧边栏索引重写。完整历史修复仍可手动运行 `python -m codex_mate history-sync --json`。
+Codex Mate 会直接读取本机 `~/.cc-switch/cc-switch.db` 里的 `app_type = "codex"` 供应商，展示名称、当前启用状态、模式、Base URL、Wire API 和 API Key 是否存在。点击“切换”后，Codex Mate 会按当前模式写入 Codex 配置：保留官方登录态时只更新 `config.toml` 里的当前 provider；纯 API 兼容模式才会写入 `auth.json`。切换成功后会同步 CC Switch 的当前供应商状态，并执行一次轻量历史可见性同步：只修 provider 可见性相关字段，不做时间、侧边栏索引或全局状态重写。完整历史修复仍可手动运行 `python -m codex_mate history-sync --json`。
 
 如果没有安装 CC Switch、数据库不存在，或还没有 Codex 供应商，面板会显示空状态，不会卡住 Codex。
 
@@ -428,15 +427,11 @@ Codex Mate 会直接读取本机 `~/.cc-switch/cc-switch.db` 里的 `app_type = 
 
 移动会同步本机 SQLite、rollout 文件和 Codex 的侧边栏状态文件。界面会尽量马上把这一行挪到目标位置；如果当前侧边栏没有展开或没有对应目标，重启或刷新 Codex 后也会按新的归属显示。
 
-### 对话节点预览
-
-Codex Mate 会读取本机 Codex sqlite 数据库和当前会话对应的 rollout 文件，在右侧生成可点击的用户提问节点。节点不依赖当前页面已经渲染出多少条消息，所以长对话也能按完整进度定位。默认最多显示 30 条，避免超长会话把右侧原点堆满；可以在 CM 面板里调整最大显示条数。
-
-把指针放到原点上时会显示对应提问预览。点击原点时，Codex Mate 会先尝试匹配当前已经渲染出来的用户消息；如果目标消息还没挂载到页面里，会先按完整进度滚动到附近，再等待页面加载后继续定位。整个过程只读取本机数据，不会改写聊天记录。
-
 ### 滚动位置恢复
 
 Codex Mate 会记住每个会话的阅读位置。切换到别的会话再回来时，会尽量回到上次看到的位置，避免 Codex 自动滚到最底部。
+
+Codex 新版已经自带上下文目录。Codex Mate 不再额外注入右侧目录，避免遮挡内容或和 Codex 自带跳转互相影响。
 
 ### 检查更新
 
@@ -451,7 +446,7 @@ python -m codex_mate update
 
 ## 历史同步
 
-Codex 的本地历史会带有 provider/model 相关信息。切换账号、API、provider 或模型后，旧聊天记录有时并没有丢，只是和当前配置不匹配，所以侧边栏不再展示。
+Codex 的本地历史会带有 provider 相关信息。切换账号、API 或 provider 后，旧聊天记录有时并没有丢，只是和当前配置不匹配，所以侧边栏不再展示。
 
 Codex Mate 会读取：
 
@@ -459,20 +454,27 @@ Codex Mate 会读取：
 ~/.codex/config.toml
 ```
 
-然后同步这些本地数据：
+自动启动、watcher 定期检查和 CC Switch 切换后的默认处理只做轻量历史可见性同步。它只会改这些字段：
 
 ```text
-~/.codex/sqlite/*.db
-~/.codex/sqlite/*.sqlite
-~/.codex/sqlite/*.sqlite3
-~/.codex/state_5.sqlite
-~/.codex/sessions/**/rollout-*.jsonl
-~/.codex/archived_sessions/**/rollout-*.jsonl
+~/.codex/sqlite/*.db                 threads.model_provider
+~/.codex/sqlite/*.sqlite             threads.model_provider
+~/.codex/sqlite/*.sqlite3            threads.model_provider
+~/.codex/state_5.sqlite              threads.model_provider
+~/.codex/sessions/**/rollout-*.jsonl session_meta.payload.model_provider
+~/.codex/archived_sessions/**/rollout-*.jsonl session_meta.payload.model_provider
+```
+
+如果 SQLite 里有 `has_user_event`，Codex Mate 只会对 rollout 里确认有用户消息的会话设为 `1`。如果 SQLite 里有 `cwd`，Codex Mate 只会用 rollout 里的 `session_meta.cwd` 补上缺失的工作目录。写 rollout 后会恢复原文件修改时间，避免 Codex 把多条会话显示成同一个更新时间。
+
+自动同步不会改这些文件：
+
+```text
 ~/.codex/session_index.jsonl
 ~/.codex/.codex-global-state.json
 ```
 
-如果 `config.toml` 里没有显式写 `model_provider`，Codex Mate 会按官方默认 provider `openai` 处理。部分切换工具在切回官方模型时只写 `model`，这种情况下也可以直接运行历史同步。
+如果 `config.toml` 里没有显式写 `model_provider`，Codex Mate 会按官方默认 provider `openai` 处理。
 
 查看状态：
 
@@ -480,11 +482,19 @@ Codex Mate 会读取：
 python -m codex_mate history-status --json
 ```
 
-手动同步：
+手动轻量修复：
+
+```bash
+python -m codex_mate provider-sync --json
+```
+
+手动完整修复：
 
 ```bash
 python -m codex_mate history-sync --json
 ```
+
+`provider-sync` 只处理 provider 可见性相关字段；`history-sync` 会进一步处理本机索引、时间和全局状态，并在修改前备份。只有轻量修复后仍看不到旧会话时，再使用完整修复。
 
 如果重新登录 ChatGPT 账号后侧边栏历史变空，可以这样处理：
 
@@ -685,6 +695,7 @@ python -m codex_mate remove
 | 查看诊断状态 | `python -m codex_mate doctor --json` |
 | 导出诊断日志 | `python -m codex_mate logs` |
 | 查看历史同步状态 | `python -m codex_mate history-status --json` |
+| 轻量修复历史可见性 | `python -m codex_mate provider-sync --json` |
 | 强制历史同步 | `python -m codex_mate history-sync --json` |
 | 查看 provider 模式 | `python -m codex_mate provider-mode status --json` |
 | 切回官方登录 | `python -m codex_mate provider-mode official` |

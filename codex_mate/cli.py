@@ -98,6 +98,8 @@ def build_parser() -> argparse.ArgumentParser:
     add_history_arguments(history_status_parser)
     history_sync_parser = subparsers.add_parser("history-sync", help="Sync local history to the current provider/model")
     add_history_arguments(history_sync_parser)
+    provider_sync_parser = subparsers.add_parser("provider-sync", help="Safely sync local history visibility to the current provider")
+    add_history_arguments(provider_sync_parser)
 
     provider_mode_parser = subparsers.add_parser("provider-mode", help="Inspect or switch Codex provider auth mode")
     provider_mode_subparsers = provider_mode_parser.add_subparsers(dest="provider_mode")
@@ -272,17 +274,17 @@ def sync_native_features_before_launch(args: argparse.Namespace) -> None:
 def sync_history_before_launch(args: argparse.Namespace) -> None:
     try:
         codex_home = codex_storage.codex_home_for_db_path(args.db) if getattr(args, "db", None) else None
-        result = history_sync.sync_history_if_ready(history_sync.resolve_paths(codex_home))
+        result = history_sync.sync_history_visibility_if_ready(history_sync.resolve_paths(codex_home))
     except Exception as exc:
-        append_launch_warning("history sync failed before launch: " + str(exc))
-        print(f"History sync skipped: {exc}")
+        append_launch_warning("history visibility sync failed before launch: " + str(exc))
+        print(f"History visibility sync skipped: {exc}")
         return
     if result.get("skipped"):
         return
     changed = int(result.get("updated_database_rows", 0)) + int(result.get("updated_session_files", 0))
     if changed:
         print(
-            "History synced to current provider/model "
+            "History visibility synced to current provider "
             f"(database rows={result.get('updated_database_rows')}, session files={result.get('updated_session_files')})."
         )
 
@@ -346,6 +348,12 @@ def run_history_status(args: argparse.Namespace) -> int:
 
 def run_history_sync(args: argparse.Namespace) -> int:
     payload = history_sync.sync_history_to_current_profile(history_sync.resolve_paths(args.codex_home))
+    print_payload(payload, args.json)
+    return 0
+
+
+def run_provider_sync(args: argparse.Namespace) -> int:
+    payload = history_sync.sync_history_visibility_if_ready(history_sync.resolve_paths(args.codex_home))
     print_payload(payload, args.json)
     return 0
 
@@ -418,6 +426,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_history_status(args)
     if args.command == "history-sync":
         return run_history_sync(args)
+    if args.command == "provider-sync":
+        return run_provider_sync(args)
     if args.command == "provider-mode":
         return run_provider_mode(args)
     if args.command == "logs":

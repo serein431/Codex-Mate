@@ -49,7 +49,8 @@ def test_readme_describes_2_0_user_path_and_storage_locations():
     text = Path("README.md").read_text(encoding="utf-8")
 
     assert "## 2.1 更新重点" in text
-    assert "右侧问题节点" in text
+    assert "轻量 provider 可见性修复" in text
+    assert "Codex Mate 不再额外注入右侧目录" in text
     assert "## 2.0 更新重点" in text
     assert "官方登录态保护面板" in text
     assert "没检测到 ChatGPT token 时，不会把官方登录态保护显示成已开启" in text
@@ -192,12 +193,13 @@ def test_readme_describes_export_cc_switch_and_scroll_restore():
     assert "读取本机 Codex sqlite 数据库" in text
     assert "### 会话移动" in text
     assert "侧边栏里已有的项目" in text
-    assert "### 对话节点预览" in text
-    assert "读取本机 Codex sqlite 数据库和当前会话对应的 rollout 文件" in text
-    assert "右侧原点" in text
-    assert "默认最多显示 30 条" in text
     assert "### 滚动位置恢复" in text
     assert "上次看到的位置" in text
+    assert "Codex 新版已经自带上下文目录" in text
+    assert "Codex Mate 不再额外注入右侧目录" in text
+    assert "### 对话节点预览" not in text
+    assert "右侧原点" not in text
+    assert "默认最多显示 30 条" not in text
     assert "用户问题时间线" not in text
     assert "对话时间线" not in text
     assert "原生文件树入口" not in text

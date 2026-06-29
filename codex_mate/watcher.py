@@ -366,9 +366,9 @@ def launcher_command_available() -> bool:
 
 def sync_history_for_watcher(context: str, *, log_skipped: bool = False) -> None:
     try:
-        result = history_sync.sync_history_if_ready(history_sync.resolve_paths())
+        result = history_sync.sync_history_visibility_if_ready(history_sync.resolve_paths())
     except Exception as exc:
-        log(f"history sync {context} failed: {exc}")
+        log(f"history visibility sync {context} failed: {exc}")
         return
     if result.get("skipped"):
         if log_skipped:
@@ -376,7 +376,7 @@ def sync_history_for_watcher(context: str, *, log_skipped: bool = False) -> None
         return
     changed = int(result.get("updated_database_rows", 0)) + int(result.get("updated_session_files", 0))
     log(
-        f"history synced {context} "
+        f"history visibility synced {context} "
         f"(database rows={result.get('updated_database_rows')}, session files={result.get('updated_session_files')}, changed={changed})"
     )
 

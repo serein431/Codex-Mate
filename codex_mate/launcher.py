@@ -14,7 +14,6 @@ from codex_mate.app_paths import resolve_codex_app_dir
 from codex_mate.api_adapter import ApiAdapter, UnavailableApiAdapter
 from codex_mate.backup_store import BackupStore
 from codex_mate.cdp import inject_file, list_targets
-from codex_mate.conversation_timeline import ConversationTimelineService
 from codex_mate.helper_server import HelperServer
 from codex_mate.markdown_export import MarkdownExportService
 from codex_mate.models import DeleteResult, DeleteStatus, SessionRef
@@ -27,7 +26,6 @@ class ApiFirstDeleteService:
         self.api_adapter = api_adapter
         self.local_adapter = SQLiteStorageAdapter(db_path, BackupStore(backup_dir)) if db_path else None
         self.markdown_exporter = MarkdownExportService(db_path)
-        self.timeline = ConversationTimelineService(db_path)
         self._update_lock = threading.Lock()
 
     def delete(self, session: SessionRef) -> DeleteResult:
@@ -136,9 +134,6 @@ class ApiFirstDeleteService:
 
     def export_markdown(self, session: SessionRef) -> dict[str, object]:
         return self.markdown_exporter.export(session).to_dict()
-
-    def conversation_timeline(self, session: SessionRef) -> dict[str, object]:
-        return self.timeline.timeline(session)
 
     def backend_status(self) -> dict[str, object]:
         return {"status": "ok", "message": "后端已连接", "version": __version__}
@@ -618,9 +613,6 @@ def handle_bridge_request(service: ApiFirstDeleteService, path: str, payload: di
     if path == "/export-markdown":
         session = SessionRef(session_id=str(payload.get("session_id", "")), title=str(payload.get("title", "")))
         return service.export_markdown(session)
-    if path == "/conversation-timeline":
-        session = SessionRef(session_id=str(payload.get("session_id", "")), title=str(payload.get("title", "")))
-        return service.conversation_timeline(session)
     if path == "/move-thread-workspace":
         session = SessionRef(session_id=str(payload.get("session_id", "")), title=str(payload.get("title", "")))
         return service.move_thread_workspace(session, str(payload.get("target_cwd", "")))
@@ -654,4 +646,4 @@ def handle_bridge_request(service: ApiFirstDeleteService, path: str, payload: di
         return service.cc_switch_providers()
     if path == "/cc-switch/apply":
         return service.apply_cc_switch_provider(str(payload.get("source_id", "")))
-    return {"status": DeleteStatus.FAILED.value, "session_id": str(payload.get("session_id", "")), "message": "Unknown bridge path"}
+    return {"error": "not found"}

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import sqlite3
 import time
 import tomllib
@@ -8,6 +10,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+from types import TracebackType
 from typing import Iterator
 
 from codex_mate import codex_storage
@@ -43,6 +46,47 @@ class SessionMetadata:
     model: str | None
     missing_provider: bool
 
+
+@dataclass(frozen=True)
+class ProviderSyncSessionChange:
+    path: Path
+    original_text: str
+    next_text: str
+    original_mtime_ns: int | None
+    thread_id: str | None
+    cwd: str | None
+    has_user_event: bool
+    rewrite_needed: bool
+    encrypted_provider_warning: bool
+
+
+class ProviderSyncLock:
+    def __init__(self, path: Path):
+        self.path = path
+        self.acquired = False
+
+    def __enter__(self) -> "ProviderSyncLock":
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            self.path.mkdir()
+        except FileExistsError as exc:
+            raise RuntimeError(f"provider sync lock exists: {self.path}") from exc
+        self.acquired = True
+        owner = {"pid": os.getpid(), "started_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")}
+        try:
+            (self.path / "owner.json").write_text(json.dumps(owner, ensure_ascii=False) + "\n", encoding="utf-8")
+        except OSError:
+            pass
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc: BaseException | None,
+        traceback: TracebackType | None,
+    ) -> None:
+        if self.acquired:
+            shutil.rmtree(self.path, ignore_errors=True)
 
 def resolve_paths(codex_home: str | Path | None = None) -> HistoryPaths:
     home = Path(codex_home).expanduser() if codex_home is not None else Path.home() / ".codex"
@@ -271,6 +315,7 @@ def session_file_metadata(path: Path) -> list[SessionMetadata]:
 
 def session_profile_status(paths: HistoryPaths, profile: CurrentProfile, thread_ids: set[str]) -> dict[str, int]:
     mismatched_session_files = 0
+    mismatched_provider_files = 0
     missing_provider_files = 0
     mismatched_model_files = 0
     inspected_session_files = 0
@@ -280,16 +325,20 @@ def session_profile_status(paths: HistoryPaths, profile: CurrentProfile, thread_
             continue
         inspected_session_files += 1
         file_mismatched = False
+        file_provider_mismatched = False
         file_missing_provider = False
         file_model_mismatched = False
         for record in records:
             provider_mismatched = record.provider != profile.provider
             model_mismatched = not metadata_model_matches(record.model, profile)
             file_mismatched = file_mismatched or provider_mismatched or model_mismatched
+            file_provider_mismatched = file_provider_mismatched or provider_mismatched
             file_missing_provider = file_missing_provider or record.missing_provider
             file_model_mismatched = file_model_mismatched or model_mismatched
         if file_mismatched:
             mismatched_session_files += 1
+        if file_provider_mismatched:
+            mismatched_provider_files += 1
         if file_missing_provider:
             missing_provider_files += 1
         if file_model_mismatched:
@@ -297,6 +346,7 @@ def session_profile_status(paths: HistoryPaths, profile: CurrentProfile, thread_
     return {
         "inspected_session_files": inspected_session_files,
         "mismatched_session_files": mismatched_session_files,
+        "mismatched_session_provider_files": mismatched_provider_files,
         "session_files_missing_provider": missing_provider_files,
         "mismatched_session_model_files": mismatched_model_files,
     }
@@ -451,6 +501,187 @@ def update_session_files(paths: HistoryPaths, profile: CurrentProfile) -> dict[s
             continue
         changed += 1
     return {"updated_session_files": changed, "skipped_session_files": skipped}
+
+
+def provider_sync_lock_path(paths: HistoryPaths) -> Path:
+    return paths.codex_home / "tmp" / "provider-sync.lock"
+
+
+def restore_file_mtime_ns(path: Path, mtime_ns: int | None) -> None:
+    if mtime_ns is None:
+        return
+    try:
+        os.utime(path, ns=(mtime_ns, mtime_ns))
+    except OSError:
+        pass
+
+
+def provider_sync_line_payload(item: object, *, first_line: bool = False) -> dict[str, object] | None:
+    if not isinstance(item, dict):
+        return None
+    if item.get("type") == "session_meta":
+        payload = item.get("payload")
+        return payload if isinstance(payload, dict) else None
+    if first_line and item.get("id") and "type" not in item:
+        return item
+    return None
+
+
+def rollout_has_user_event(text: str) -> bool:
+    return '"user_message"' in text or '"user_input"' in text or '"role":"user"' in text or '"role": "user"' in text
+
+
+def provider_sync_rollout_change(path: Path, profile: CurrentProfile) -> ProviderSyncSessionChange | None:
+    try:
+        text = path.read_text(encoding="utf-8")
+        original_mtime_ns = path.stat().st_mtime_ns
+    except OSError:
+        return None
+    new_lines: list[str] = []
+    rewrite_needed = False
+    thread_id: str | None = None
+    cwd: str | None = None
+    encrypted_provider_warning = False
+    encrypted_present = "encrypted_content" in text
+    for index, line in enumerate(text.splitlines(keepends=True)):
+        content, ending = split_line_ending(line)
+        if not content:
+            new_lines.append(line)
+            continue
+        try:
+            item = json.loads(content)
+        except json.JSONDecodeError:
+            new_lines.append(line)
+            continue
+        payload = provider_sync_line_payload(item, first_line=index == 0)
+        if payload is None:
+            new_lines.append(line)
+            continue
+        if thread_id is None and payload.get("id"):
+            thread_id = str(payload.get("id"))
+        if cwd is None and isinstance(payload.get("cwd"), str) and str(payload.get("cwd")).strip():
+            cwd = str(payload.get("cwd")).strip()
+        current_provider = payload.get("model_provider")
+        if encrypted_present and current_provider != profile.provider:
+            encrypted_provider_warning = True
+        if current_provider != profile.provider:
+            payload["model_provider"] = profile.provider
+            rewrite_needed = True
+        new_lines.append(json.dumps(item, ensure_ascii=False, separators=(",", ":")) + ending)
+    if not thread_id and not rewrite_needed and not encrypted_provider_warning:
+        return None
+    return ProviderSyncSessionChange(
+        path=path,
+        original_text=text,
+        next_text="".join(new_lines),
+        original_mtime_ns=original_mtime_ns,
+        thread_id=thread_id,
+        cwd=cwd,
+        has_user_event=rollout_has_user_event(text),
+        rewrite_needed=rewrite_needed,
+        encrypted_provider_warning=encrypted_provider_warning,
+    )
+
+
+def collect_provider_sync_session_changes(paths: HistoryPaths, profile: CurrentProfile) -> list[ProviderSyncSessionChange]:
+    changes: list[ProviderSyncSessionChange] = []
+    for path in iter_session_files(paths):
+        change = provider_sync_rollout_change(path, profile)
+        if change is not None:
+            changes.append(change)
+    return changes
+
+
+def write_provider_sync_session_changes(changes: list[ProviderSyncSessionChange]) -> tuple[list[ProviderSyncSessionChange], list[str]]:
+    written: list[ProviderSyncSessionChange] = []
+    skipped: list[str] = []
+    for change in changes:
+        if not change.rewrite_needed:
+            continue
+        try:
+            atomic_write_text(change.path, change.next_text)
+            restore_file_mtime_ns(change.path, change.original_mtime_ns)
+            written.append(change)
+        except OSError as exc:
+            skipped.append(f"{change.path}: {exc}")
+    return written, skipped
+
+
+def restore_provider_sync_session_changes(changes: list[ProviderSyncSessionChange]) -> None:
+    for change in changes:
+        try:
+            atomic_write_text(change.path, change.original_text)
+            restore_file_mtime_ns(change.path, change.original_mtime_ns)
+        except OSError:
+            continue
+
+
+def provider_sync_thread_metadata(changes: list[ProviderSyncSessionChange]) -> tuple[set[str], dict[str, str]]:
+    user_event_thread_ids = {change.thread_id for change in changes if change.thread_id and change.has_user_event}
+    cwd_by_thread_id = {change.thread_id: change.cwd for change in changes if change.thread_id and change.cwd}
+    return set(user_event_thread_ids), dict(cwd_by_thread_id)
+
+
+def update_provider_visibility_database_threads(
+    paths: HistoryPaths,
+    profile: CurrentProfile,
+    changes: list[ProviderSyncSessionChange],
+) -> dict[str, object]:
+    total_changed = 0
+    changed_files = 0
+    skipped: list[str] = []
+    updated_fields: list[str] = []
+    user_event_thread_ids, cwd_by_thread_id = provider_sync_thread_metadata(changes)
+    for db_path in database_paths(paths):
+        with connect_db(db_path) as conn:
+            if not table_exists(conn, "threads"):
+                skipped.append(f"{db_path}: missing threads table")
+                continue
+            columns = table_columns(conn, "threads")
+            if "model_provider" not in columns:
+                skipped.append(f"{db_path}: missing model_provider column")
+                continue
+            conn.execute("BEGIN IMMEDIATE")
+            file_changed = 0
+            try:
+                file_changed += conn.execute(
+                    "UPDATE threads SET model_provider = ? WHERE model_provider IS NULL OR model_provider <> ?",
+                    (profile.provider, profile.provider),
+                ).rowcount
+                if "model_provider" not in updated_fields:
+                    updated_fields.append("model_provider")
+                if "has_user_event" in columns and user_event_thread_ids:
+                    for thread_id in sorted(user_event_thread_ids):
+                        file_changed += conn.execute(
+                            "UPDATE threads SET has_user_event = 1 WHERE id = ? AND COALESCE(has_user_event, 0) <> 1",
+                            (thread_id,),
+                        ).rowcount
+                    if "has_user_event" not in updated_fields:
+                        updated_fields.append("has_user_event")
+                if "cwd" in columns and cwd_by_thread_id:
+                    for thread_id, cwd in sorted(cwd_by_thread_id.items()):
+                        file_changed += conn.execute(
+                            "UPDATE threads SET cwd = ? WHERE id = ? AND COALESCE(cwd, '') <> ?",
+                            (cwd, thread_id, cwd),
+                        ).rowcount
+                    if "cwd" not in updated_fields:
+                        updated_fields.append("cwd")
+            except sqlite3.Error:
+                conn.rollback()
+                raise
+            else:
+                conn.commit()
+        if file_changed:
+            total_changed += int(file_changed)
+            changed_files += 1
+    result: dict[str, object] = {
+        "updated_database_rows": total_changed,
+        "updated_database_files": changed_files,
+        "updated_fields": updated_fields,
+    }
+    if skipped:
+        result["skipped_database_sync"] = skipped
+    return result
 
 
 def iso_from_unix(value: int | None) -> str:
@@ -790,20 +1021,58 @@ def sync_history_visibility_to_current_profile(paths: HistoryPaths) -> dict[str,
     if missing:
         raise RuntimeError(missing)
     profile = read_current_profile(paths)
-    db_backup, database_backups = make_backup(paths, "provider-switch")
-    db_result = update_database_threads(paths, profile)
-    session_result = update_session_files(paths, profile)
-    return {
-        "ok": True,
-        "skipped": False,
-        "visibility_only": True,
-        "current_provider": profile.provider,
-        "current_model": profile.model,
-        "backup_path": str(db_backup),
-        "database_backup_paths": [str(path) for path in database_backups],
-        **db_result,
-        **session_result,
-    }
+    try:
+        with ProviderSyncLock(provider_sync_lock_path(paths)):
+            db_backup, database_backups = make_backup(paths, "provider-switch")
+            changes = collect_provider_sync_session_changes(paths, profile)
+            written: list[ProviderSyncSessionChange] = []
+            skipped_session_files: list[str] = []
+            try:
+                written, skipped_session_files = write_provider_sync_session_changes(changes)
+                db_result = update_provider_visibility_database_threads(paths, profile, changes)
+            except Exception as exc:
+                restore_provider_sync_session_changes(written)
+                return {
+                    "ok": True,
+                    "skipped": True,
+                    "visibility_only": True,
+                    "current_provider": profile.provider,
+                    "current_model": profile.model,
+                    "backup_path": str(db_backup),
+                    "database_backup_paths": [str(path) for path in database_backups],
+                    "reason": f"Provider sync skipped: {exc}",
+                    "updated_session_files": 0,
+                    "skipped_session_files": skipped_session_files,
+                }
+            result: dict[str, object] = {
+                "ok": True,
+                "skipped": False,
+                "visibility_only": True,
+                "current_provider": profile.provider,
+                "current_model": profile.model,
+                "backup_path": str(db_backup),
+                "database_backup_paths": [str(path) for path in database_backups],
+                "updated_session_files": len(written),
+                "skipped_session_files": skipped_session_files,
+                **db_result,
+            }
+            if any(change.encrypted_provider_warning for change in changes):
+                result["encrypted_content_warning"] = (
+                    "检测到包含 encrypted_content 的旧供应商会话。已修复可见性字段，"
+                    "但继续旧会话时仍可能需要切回原供应商或新开会话。"
+                )
+            return result
+    except RuntimeError as exc:
+        if "provider sync lock exists" in str(exc):
+            return {
+                "ok": True,
+                "skipped": True,
+                "visibility_only": True,
+                "current_provider": profile.provider,
+                "current_model": profile.model,
+                "reason": str(exc),
+            }
+        raise
 
 
 def sync_history_visibility_if_ready(paths: HistoryPaths) -> dict[str, object]:
@@ -812,14 +1081,13 @@ def sync_history_visibility_if_ready(paths: HistoryPaths) -> dict[str, object]:
         return {"ok": True, "skipped": True, "reason": missing}
     current_status = status(paths)
     mismatched_provider = int(current_status.get("mismatched_provider_threads") or 0)
-    mismatched_model = int(current_status.get("mismatched_model_threads") or 0)
-    mismatched_sessions = int(current_status.get("mismatched_session_files") or 0)
-    if mismatched_provider == 0 and mismatched_model == 0 and mismatched_sessions == 0:
+    mismatched_sessions = int(current_status.get("mismatched_session_provider_files") or 0)
+    if mismatched_provider == 0 and mismatched_sessions == 0:
         return {
             **current_status,
             "skipped": True,
             "visibility_only": True,
-            "reason": "history already matches current provider/model",
+            "reason": "history already matches current provider",
         }
     return {**current_status, **sync_history_visibility_to_current_profile(paths)}
 

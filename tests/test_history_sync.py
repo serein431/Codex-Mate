@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from pathlib import Path
 
@@ -132,6 +133,34 @@ def create_threads_db_with_cwd(home: Path) -> None:
         conn.close()
 
 
+def create_provider_visibility_db(path: Path, rows: list[tuple[str, str, str, int, str, int, int]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE threads (
+                id TEXT PRIMARY KEY,
+                title TEXT,
+                updated_at INTEGER,
+                updated_at_ms INTEGER,
+                archived INTEGER DEFAULT 0,
+                model_provider TEXT,
+                model TEXT,
+                has_user_event INTEGER DEFAULT 0,
+                cwd TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
+        conn.executemany(
+            "INSERT INTO threads (id, title, updated_at, updated_at_ms, archived, model_provider, model, has_user_event, cwd) VALUES (?, ?, ?, ?, 0, ?, ?, ?, ?)",
+            rows,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def write_session_file(home: Path, thread_id: str, provider: str, model: str) -> Path:
     session_dir = home / "sessions" / "2026" / "01"
     session_dir.mkdir(parents=True, exist_ok=True)
@@ -145,6 +174,54 @@ def write_session_file(home: Path, thread_id: str, provider: str, model: str) ->
         },
     }
     path.write_text(json.dumps(first) + "\n{\"type\":\"event_msg\",\"payload\":{}}\n", encoding="utf-8")
+    return path
+
+
+def write_provider_visibility_rollout(
+    home: Path,
+    thread_id: str,
+    *,
+    provider: str = "old_provider",
+    model: str = "gpt-old",
+    cwd: str = "/work/project",
+    archived: bool = False,
+    encrypted: bool = False,
+) -> Path:
+    root = home / ("archived_sessions" if archived else "sessions") / "2026" / "01"
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / f"rollout-2026-01-01T00-00-00-{thread_id}.jsonl"
+    first = {
+        "type": "session_meta",
+        "payload": {
+            "id": thread_id,
+            "model_provider": provider,
+            "model": model,
+            "cwd": cwd,
+        },
+    }
+    second = {
+        "type": "session_meta",
+        "payload": {
+            "id": thread_id,
+            "model_provider": provider,
+            "model": model,
+            "cwd": cwd,
+        },
+    }
+    assistant = {"type": "response_item", "payload": {"role": "assistant", "content": []}}
+    if encrypted:
+        assistant["payload"]["encrypted_content"] = "opaque"
+    path.write_text(
+        json.dumps(first)
+        + "\n"
+        + json.dumps({"type": "event_msg", "payload": {"type": "user_message"}})
+        + "\n"
+        + json.dumps(second)
+        + "\n"
+        + json.dumps(assistant)
+        + "\n",
+        encoding="utf-8",
+    )
     return path
 
 
@@ -768,10 +845,136 @@ def test_sync_history_visibility_if_ready_skips_heavy_sidebar_rewrites(tmp_path)
 
     with sqlite3.connect(home / "state_5.sqlite") as conn:
         rows = conn.execute("SELECT model_provider, model, COUNT(*) FROM threads GROUP BY model_provider, model").fetchall()
-    assert rows == [("current_provider", "gpt-current", 3)]
+    assert rows == [("current_provider", "gpt-current", 1), ("current_provider", "gpt-old", 2)]
     payload = json.loads(session_path.read_text(encoding="utf-8").splitlines()[0])["payload"]
     assert payload["model_provider"] == "current_provider"
-    assert payload["model"] == "gpt-current"
+    assert payload["model"] == "gpt-old"
+
+
+def test_sync_history_visibility_if_ready_updates_provider_only_and_preserves_times_indexes_and_mtime(tmp_path):
+    home = tmp_path / ".codex"
+    write_config(home)
+    rollout = write_provider_visibility_rollout(home, "thread-1", cwd="/work/project")
+    old_mtime_ns = 1_700_000_000_123_456_789
+    os.utime(rollout, ns=(old_mtime_ns, old_mtime_ns))
+    create_provider_visibility_db(
+        home / "state_5.sqlite",
+        [
+            ("thread-1", "Thread 1", 100, 100000, "old_provider", "gpt-old", 0, ""),
+            ("thread-2", "Thread 2", 200, 200000, "old_provider", "gpt-old", 0, ""),
+        ],
+    )
+    session_index = json.dumps({"id": "thread-1", "thread_name": "Thread 1", "updated_at": "1970-01-01T00:00:00Z"}) + "\n"
+    (home / "session_index.jsonl").write_text(session_index, encoding="utf-8")
+    (home / ".codex-global-state.json").write_text('{"project-order":["/keep"]}\n', encoding="utf-8")
+
+    result = history_sync.sync_history_visibility_if_ready(history_sync.resolve_paths(home))
+
+    assert result["ok"] is True
+    assert result["visibility_only"] is True
+    assert result["updated_session_files"] == 1
+    assert result["updated_database_rows"] == 4
+    assert result["updated_fields"] == ["model_provider", "has_user_event", "cwd"]
+    assert result["updated_database_files"] == 1
+    assert "updated_database_timestamps" not in result
+    assert "rewritten_index_entries" not in result
+    assert "updated_global_state" not in result
+    assert (home / "session_index.jsonl").read_text(encoding="utf-8") == session_index
+    with sqlite3.connect(home / "state_5.sqlite") as conn:
+        rows = conn.execute(
+            "SELECT id, model_provider, model, has_user_event, cwd, updated_at, updated_at_ms FROM threads ORDER BY id"
+        ).fetchall()
+    assert rows == [
+        ("thread-1", "current_provider", "gpt-old", 1, "/work/project", 100, 100000),
+        ("thread-2", "current_provider", "gpt-old", 0, "", 200, 200000),
+    ]
+    assert rollout.stat().st_mtime_ns == old_mtime_ns
+    providers = [
+        json.loads(line)["payload"]["model_provider"]
+        for line in rollout.read_text(encoding="utf-8").splitlines()
+        if json.loads(line).get("type") == "session_meta"
+    ]
+    assert providers == ["current_provider", "current_provider"]
+
+
+def test_sync_history_visibility_if_ready_scans_archived_and_new_sqlite_dir(tmp_path):
+    home = tmp_path / ".codex"
+    write_config(home)
+    rollout = write_provider_visibility_rollout(home, "archived-thread", cwd="/work/archived", archived=True)
+    create_provider_visibility_db(
+        home / "sqlite" / "codex-dev.db",
+        [("archived-thread", "Archived", 10, 10000, "old_provider", "gpt-old", 0, "")],
+    )
+
+    result = history_sync.sync_history_visibility_if_ready(history_sync.resolve_paths(home))
+
+    assert result["ok"] is True
+    assert result["updated_session_files"] == 1
+    assert result["database_paths"] == [str(home / "sqlite" / "codex-dev.db")]
+    with sqlite3.connect(home / "sqlite" / "codex-dev.db") as conn:
+        row = conn.execute("SELECT model_provider, model, has_user_event, cwd FROM threads WHERE id = ?", ("archived-thread",)).fetchone()
+    assert row == ("current_provider", "gpt-old", 1, "/work/archived")
+    payload = json.loads(rollout.read_text(encoding="utf-8").splitlines()[0])["payload"]
+    assert payload["model_provider"] == "current_provider"
+
+
+def test_sync_history_visibility_if_ready_skips_when_provider_sync_lock_exists(tmp_path):
+    home = tmp_path / ".codex"
+    write_config(home)
+    write_provider_visibility_rollout(home, "thread-1")
+    create_provider_visibility_db(home / "state_5.sqlite", [("thread-1", "Thread 1", 10, 10000, "old_provider", "gpt-old", 0, "")])
+    (home / "tmp" / "provider-sync.lock").mkdir(parents=True)
+
+    result = history_sync.sync_history_visibility_if_ready(history_sync.resolve_paths(home))
+
+    assert result["ok"] is True
+    assert result["skipped"] is True
+    assert "provider sync lock exists" in result["reason"]
+    with sqlite3.connect(home / "state_5.sqlite") as conn:
+        provider = conn.execute("SELECT model_provider FROM threads WHERE id = ?", ("thread-1",)).fetchone()[0]
+    assert provider == "old_provider"
+
+
+def test_sync_history_visibility_if_ready_rolls_back_rollout_when_database_update_fails(tmp_path):
+    home = tmp_path / ".codex"
+    write_config(home)
+    rollout = write_provider_visibility_rollout(home, "thread-1")
+    original_text = rollout.read_text(encoding="utf-8")
+    old_mtime_ns = 1_700_000_001_123_456_789
+    os.utime(rollout, ns=(old_mtime_ns, old_mtime_ns))
+    create_provider_visibility_db(home / "state_5.sqlite", [("thread-1", "Thread 1", 10, 10000, "old_provider", "gpt-old", 0, "")])
+    with sqlite3.connect(home / "state_5.sqlite") as conn:
+        conn.execute(
+            "CREATE TRIGGER fail_provider_sync_update BEFORE UPDATE ON threads BEGIN SELECT RAISE(ABORT, 'boom'); END"
+        )
+        conn.commit()
+
+    result = history_sync.sync_history_visibility_if_ready(history_sync.resolve_paths(home))
+
+    assert result["ok"] is True
+    assert result["skipped"] is True
+    assert "Provider sync skipped" in result["reason"]
+    assert rollout.read_text(encoding="utf-8") == original_text
+    assert rollout.stat().st_mtime_ns == old_mtime_ns
+    with sqlite3.connect(home / "state_5.sqlite") as conn:
+        provider = conn.execute("SELECT model_provider FROM threads WHERE id = ?", ("thread-1",)).fetchone()[0]
+    assert provider == "old_provider"
+
+
+def test_sync_history_visibility_if_ready_warns_for_encrypted_content(tmp_path):
+    home = tmp_path / ".codex"
+    write_config(home)
+    write_provider_visibility_rollout(home, "thread-1", encrypted=True)
+    create_provider_visibility_db(home / "state_5.sqlite", [("thread-1", "Thread 1", 10, 10000, "old_provider", "gpt-old", 0, "")])
+
+    result = history_sync.sync_history_visibility_if_ready(history_sync.resolve_paths(home))
+
+    assert result["ok"] is True
+    assert result["skipped"] is False
+    assert "encrypted_content" in result["encrypted_content_warning"]
+    with sqlite3.connect(home / "state_5.sqlite") as conn:
+        provider = conn.execute("SELECT model_provider FROM threads WHERE id = ?", ("thread-1",)).fetchone()[0]
+    assert provider == "current_provider"
 
 
 def test_sync_history_repairs_desktop_global_state_sidebar_indexes(tmp_path):
